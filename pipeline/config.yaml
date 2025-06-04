@@ -1,0 +1,16 @@
+paths:
+  watch: "videos_new"
+  frames: "data/frames_tmp"
+  colmap: "data/colmap_ws"
+  ept: "data/ept_master"
+  tiles: "data/tiles_out"
+  web: "web/public/3d"
+
+colmap:
+  matcher: sequential
+  max_num_matches: 20
+  gps_noise_m: 2.5
+
+filter:
+  blur_thresh: 100.0
+  fps_target: 5
