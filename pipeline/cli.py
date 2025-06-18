@@ -179,7 +179,7 @@ def cmd_status(args):
             print(f"  ✗ {dep}: Not found")
     
     # Show recent logs
-    log_file = Path("pipeline.log")
+    log_file = Path("logs/pipeline.log")
     if log_file.exists():
         print(f"\nRecent log entries from {log_file}:")
         with open(log_file, 'r') as f:
