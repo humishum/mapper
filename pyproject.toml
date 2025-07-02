@@ -4,4 +4,16 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "click>=8.1.0",
+    "numpy>=1.24.0",
+    "open3d>=0.18.0",
+    "opencv-python>=4.8.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.0.0",
+    "pyproj>=3.6.0",
+    "pyyaml>=6.0.0",
+    "torch==2.7.1",
+    "tqdm>=4.65.0",
+    "watchdog>=4.0.0",
+]
