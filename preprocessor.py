@@ -22,9 +22,9 @@ FPS = 10
 
 
 class Preprocessor:
-    def __init__(self, video_path, output_path):
+    def __init__(self, video_path:Path, output_path:Path):
         self.video_path = video_path
-        self.output_path = output_path
+        self.output_path = output_path / video_path.name.split(".")[0]
         self._check_paths()
         self._check_ffmpeg_installed()
     
@@ -151,16 +151,16 @@ class Preprocessor:
         actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
         logger.info(f"Extracted {actual_frames} frames") 
 
-    def process(self, save_metadata: bool = True):
+    def process(self, save_metadata: bool = True)->Path:
         logger.info(f"Processing {self.video_path}")
         self._get_frames()
 
         if save_metadata:
             logger.info(f"Saving metadata to {self.output_path}")
             self._save_metadata()
-
+        return self.output_path
     def _get_initial_gps_coordinates(self)->Tuple[float, float]:
-        # Use ffmpeg or some other exif tool to get GPS coordinates, if present 
+        # Use ffmpeg to get GPS coordinates, if present 
         try:
             # Try to extract GPS coordinates using ffprobe (part of ffmpeg)
             logger.info(f"Extracting GPS coordinates from {self.video_path}")
@@ -181,27 +181,6 @@ class Preprocessor:
         except (subprocess.CalledProcessError, ValueError, AttributeError):
             pass
         
-        try:
-            # Fallback: try exiftool if available
-            logger.info(f"Extracting GPS coordinates from {self.video_path} using exiftool")
-            result = subprocess.run([
-                "exiftool", "-GPSLatitude", "-GPSLongitude", "-n", 
-                str(self.video_path)
-            ], capture_output=True, text=True, check=True)
-            
-            lines = result.stdout.strip().split('\n')
-            lat, lon = None, None
-            
-            for line in lines:
-                if 'GPS Latitude' in line:
-                    lat = float(line.split(':')[1].strip())
-                elif 'GPS Longitude' in line:
-                    lon = float(line.split(':')[1].strip())
-            
-            if lat is not None and lon is not None:
-                return lat, lon
-        except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
-            pass
         return 0.0, 0.0
     
     def _save_metadata(self)->dict:
