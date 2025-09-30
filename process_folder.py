@@ -2,7 +2,7 @@ from constructor import Constructor
 import argparse
 from pathlib import Path
 
-
+file_types = ["MOV", "mp4", "MP4"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -13,15 +13,9 @@ if __name__ == "__main__":
     top_level_folder = Path(args.folder)
     output_folder = Path(args.output_folder)
     print(f"Processing {top_level_folder}")
-    # look for all mov or mp4 files in the folder
-    for file in top_level_folder.glob("*.MOV"):
-        constructor = Constructor(file, output_folder)
-        constructor.preprocess()
-        print(f"Processed {file}")
-    for file in top_level_folder.glob("*.mp4"):
-        constructor = Constructor(file, output_folder)
-        constructor.preprocess()
-        print(f"Processed {file}")
-    
-
+    for file_type in file_types:
+        for file in top_level_folder.glob(f"*.{file_type}"):
+            constructor = Constructor(file, output_folder)
+            constructor.preprocess()
+            print(f"Processed {file}")    
     # constructor = Constructor(args.folder

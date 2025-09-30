@@ -1,8 +1,6 @@
 # this file takes in a video and outputs the images 
 # does filtering and other preprocessing 
 
-
-
 from pathlib import Path 
 import subprocess
 from typing import Tuple
@@ -183,6 +181,23 @@ class Preprocessor:
         
         return 0.0, 0.0
     
+    def _get_altitude(self)->float:
+        # Use ffmpeg to get altitude, if present 
+        try:
+            result = subprocess.run([
+                "ffprobe", "-v", "quiet", "-select_streams", "v:0", 
+                "-show_entries", "format_tags=altitude", "-of", "csv=p=0", 
+                str(self.video_path)
+            ], capture_output=True, text=True, check=True)
+            
+            altitude = result.stdout.strip()
+            if altitude and altitude != "N/A":
+                return float(altitude)
+        except (subprocess.CalledProcessError, ValueError, AttributeError):
+            pass
+        
+        return 0.0
+    
     def _save_metadata(self)->dict:
         metadata = {
             "fps": FPS,
@@ -191,14 +206,13 @@ class Preprocessor:
             "video_size": self.video_path.stat().st_size,
             "output_path": str(self.output_path),
             "initial_gps_coordinates": self._get_initial_gps_coordinates(),
+            "altitude": self._get_altitude(),
             "frames": len(list(self.output_path.glob("*.jpg")))
         }
         # Save to json at output path 
         with open(self.output_path / "metadata.json", "w") as f:
             json.dump(metadata, f)
         return metadata
-
-
 
 
 if __name__ == "__main__":

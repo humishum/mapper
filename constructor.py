@@ -6,7 +6,7 @@
 # make a call to sfm pipeline her
 
 from preprocessor import Preprocessor
-
+from aligner import Aligner
 from pathlib import Path 
 import argparse
 import logging
@@ -24,6 +24,14 @@ class Constructor:
         # Preprocess video into individual frames and metadata 
         preprocessor = Preprocessor(self.input_video_path, self.output_path)
         preprocessor.process()
+
+
+    def align(self): 
+        alinged_output_path = self.output_path/ "aligned"
+        aligner = Aligner(self.output_path, alinged_output_path)
+        aligner.align() 
+        
+
 
 
 
