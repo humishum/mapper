@@ -19,13 +19,13 @@ if __name__ == "__main__":
     weights_path = Path(args.weights_path)
     retrieval_path = Path(args.retrieval_path)
     image_size = args.image_size
-    print(f"Processing {top_level_folder}")
+    print(f"Processing videos from  {top_level_folder}")
     for file_type in file_types:
-        for file in top_level_folder.glob(f"*.{file_type}"):
+        video_files = sorted(top_level_folder.glob(f"*.{file_type}"))
+        print(f"Found {len(video_files)} {file_type} video files")
+        print(video_files)
+        for file in video_files:
+            print(f"Running Constructor pipeline for {file} ")
             constructor = Constructor(file, output_folder)
-            constructor.preprocess()
-            print(f"Processed {file}")  
-            constructor.run_3d_reconstruction(weights_path, retrieval_path, image_size)
-            # constructor.align()
-            # print(f"Aligned {file}")
-    # constructor = Constructor(args.folder
+            constructor.run(weights_path, retrieval_path, image_size)
+            print(f"Completed Constructor pipeline for {file} ")

@@ -15,6 +15,7 @@ import os
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+IMAGE_LIMIT = 100 
 
 class Constructor:
     def __init__(self, input_video_path:Path, output_path:Path):
@@ -26,13 +27,20 @@ class Constructor:
         self.pointcloud_dir_path = self.output_path / "pointclouds"
         os.makedirs(self.pointcloud_dir_path, exist_ok=True)
 
+    def run(self, weights_path:Path, retrieval_path:Path, image_size:int):
+        self._preprocess()
+        if len([image for image in self.image_dir_path.glob("*.jpg")]) >  IMAGE_LIMIT:
+            logger.info(f"Skipping 3D reconstruction for {self.input_video_path} because it has more than {IMAGE_LIMIT} images")
+            return
+        self._run_3d_reconstruction(weights_path, retrieval_path, image_size)
+        # self._align()
 
-    def preprocess(self):
+    def _preprocess(self):
         # Preprocess video into individual frames and metadata 
         preprocessor = Preprocessor(self.input_video_path, self.image_dir_path)
         preprocessor.process()
 
-    def run_3d_reconstruction(self, weights_path:Path, retrieval_path:Path, image_size:int):
+    def _run_3d_reconstruction(self, weights_path:Path, retrieval_path:Path, image_size:int):
         must3r_wrapper = MuSt3RWrapper(
             image_dir=self.image_dir_path, 
             output_dir=self.pointcloud_dir_path, 
@@ -43,7 +51,7 @@ class Constructor:
         must3r_wrapper.load_model()
         must3r_wrapper.run()
 
-    def align(self): 
+    def _align(self): 
         alinged_output_path = self.output_path/ "aligned"
         aligner = Aligner(self.output_path, alinged_output_path)
         aligner.align() 
@@ -68,13 +76,13 @@ def main():
 
     # Preprocess video into individual frames and metadata 
     constructor = Constructor(input_video_path, output_path)
-    constructor.preprocess()
-    constructor.run_3d_reconstruction(
+    
+    constructor.run(
         weights_path=Path(args.weights_path),
         retrieval_path=Path(args.retrieval_path),
         image_size=args.image_size
     )
-    # constructor.align()
+
 
 
 if __name__ == "__main__":
