@@ -1,8 +1,6 @@
 # this file takes in set of pointcloud files and aligns them using the colored ICP algorithm 
 # this dones't take into account the actual global aligment, just the single "folder" aligmnet 
 
-
-
 from pathlib import Path 
 import logging 
 import open3d as o3d 
@@ -25,11 +23,11 @@ class Aligner:
             self.output_path.mkdir(parents=True, exist_ok=True)
         
         self.point_clouds = self.load_point_clouds()
-        print(f" Input Folder: {self.folder_path}")
-        print(f" Output Folder: {self.output_path}")
-        print(f" Voxel Size: {self.voxel_size}")
-        print(f" Threshold: {self.threshold}")
-        print(f" Number of point clouds: {len(self.point_clouds)}")
+        logger.info(f" Input Folder: {self.folder_path}")
+        logger.info(f" Output Folder: {self.output_path}")
+        logger.info(f" Voxel Size: {self.voxel_size}")
+        logger.info(f" Threshold: {self.threshold}")
+        logger.info(f" Number of point clouds: {len(self.point_clouds)}")
         
     def load_point_clouds(self)->list[o3d.geometry.PointCloud]:
         return [o3d.io.read_point_cloud(ply_file) for ply_file in self.pointcloud_files]

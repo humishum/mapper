@@ -22,7 +22,7 @@ FPS = 10
 class Preprocessor:
     def __init__(self, video_path:Path, output_path:Path):
         self.video_path = video_path
-        self.output_path = output_path / video_path.name.split(".")[0]
+        self.output_path = output_path 
         self._check_paths()
         self._check_ffmpeg_installed()
     
@@ -210,7 +210,7 @@ class Preprocessor:
             "frames": len(list(self.output_path.glob("*.jpg")))
         }
         # Save to json at output path 
-        with open(self.output_path / "metadata.json", "w") as f:
+        with open(self.output_path.parent / "metadata.json", "w") as f:
             json.dump(metadata, f)
         return metadata
 

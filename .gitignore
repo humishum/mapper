@@ -2,3 +2,5 @@ data/
 .venv/
 .python-version
 .DS_Store
+third_party/
+__pycache__/
