@@ -20,12 +20,57 @@ FPS = 10
 
 
 class Preprocessor:
-    def __init__(self, video_path:Path, output_path:Path):
-        self.video_path = video_path
-        self.output_path = output_path 
+    def __init__(self, video_path:Path, output_path:Path, overwrite:bool = False):
+        self.video_path = video_path # input video 
+        self.output_path = output_path # output folder for frames 
+        self.metadata_path = self.output_path.parent / "metadata.json"
+        self.overwrite = overwrite # whether to overwrite existing frames 
+        self.fps = FPS
+        self._cached = self._check_cached()
         self._check_paths()
         self._check_ffmpeg_installed()
-    
+        
+
+    def __call__(self, save_metadata: bool = True, fast_mode: bool = False)->Path:
+        """
+        Process the video and extract frames.
+        
+        Args:
+            save_metadata: Whether to save metadata JSON file
+            fast_mode: If True, use fast extraction without progress tracking
+        """
+        logger.info(f"Processing {self.video_path}")
+        
+        if self._cached:
+            logger.info(f"Frames already cached at {self.output_path}")
+            return
+        
+        if fast_mode:
+            logger.info("Using fast extraction mode (no progress tracking)")
+            self._get_frames_fast()
+        else:
+            logger.info("Using regular extraction mode (with progress tracking)")
+            self._get_frames()
+
+        if save_metadata:
+            logger.info(f"Saving metadata to {self.output_path}")
+            self._save_metadata()
+        return self.output_path
+
+    def _check_cached(self): 
+        """ Check if frames are already written to output path with the same parameters and we can just skip"""
+
+        # Check if metadata file exists 
+        if self.metadata_path.exists():
+            with open(self.metadata_path, "r") as f:
+                metadata = json.load(f)
+            if metadata["fps"] == self.fps and metadata["video_name"] == self.video_path.name:
+                logger.info(f"Frames already cached at {self.output_path}")
+                return True
+        else:
+            logger.info(f"No metadata file found at {self.metadata_path}, will need to process video")
+            return False
+
     def _check_paths(self): 
         # Check video is valid 
         if not self.video_path.exists():
@@ -33,8 +78,14 @@ class Preprocessor:
         else:
             logger.info(f"Video file found: {self.video_path}")
 
-        # check output path is valid    
+        # Check output path is valid    
         if not self.output_path.exists():
+            os.makedirs(self.output_path)
+        
+        # if overwrite is True, delete existing frames 
+        if self.overwrite:
+            logger.warning(f"Overwriting existing frames at {self.output_path}")
+            shutil.rmtree(self.output_path)
             os.makedirs(self.output_path)
     
     def _check_ffmpeg_installed(self):
@@ -96,7 +147,6 @@ class Preprocessor:
         # Check for hardware acceleration
         hwaccel = self._check_hardware_acceleration()
         
-        # Optimized FFmpeg command for maximum speed
         cmd = ["ffmpeg", "-y"]  # -y to overwrite existing files
         
         # Add hardware acceleration if available
@@ -195,7 +245,6 @@ class Preprocessor:
         # Check for hardware acceleration
         hwaccel = self._check_hardware_acceleration()
         
-        # Ultra-optimized FFmpeg command for maximum speed
         cmd = ["ffmpeg", "-y"]  # -y to overwrite existing files
         
         # Add hardware acceleration if available
@@ -226,27 +275,7 @@ class Preprocessor:
             logger.error(f"Error output: {e.stderr}")
             raise 
 
-    def process(self, save_metadata: bool = True, fast_mode: bool = False)->Path:
-        """
-        Process the video and extract frames.
-        
-        Args:
-            save_metadata: Whether to save metadata JSON file
-            fast_mode: If True, use ultra-fast extraction without progress tracking
-        """
-        logger.info(f"Processing {self.video_path}")
-        
-        if fast_mode:
-            logger.info("Using fast extraction mode (no progress tracking)")
-            self._get_frames_fast()
-        else:
-            logger.info("Using regular extraction mode (with progress tracking)")
-            self._get_frames()
 
-        if save_metadata:
-            logger.info(f"Saving metadata to {self.output_path}")
-            self._save_metadata()
-        return self.output_path
     def _get_initial_gps_coordinates(self)->Tuple[float, float]:
         # Use ffmpeg to get GPS coordinates, if present 
         try:
@@ -300,7 +329,7 @@ class Preprocessor:
             "frames": len(list(self.output_path.glob("*.jpg")))
         }
         # Save to json at output path 
-        with open(self.output_path.parent / "metadata.json", "w") as f:
+        with open(self.metadata_path, "w") as f:
             json.dump(metadata, f)
         return metadata
 
