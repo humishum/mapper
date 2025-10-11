@@ -44,6 +44,33 @@ class Preprocessor:
         except subprocess.CalledProcessError:
             raise RuntimeError("FFmpeg is not installed. Please install FFmpeg and try again.")
     
+    def _check_hardware_acceleration(self):
+        """Check if hardware acceleration is available."""
+        try:
+            result = subprocess.run([
+                "ffmpeg", "-hwaccels"
+            ], capture_output=True, text=True, check=True)
+            
+            hwaccels = result.stdout.strip().split('\n')[1:]  # Skip header line
+            available_hwaccels = [accel.strip() for accel in hwaccels if accel.strip()]
+            
+            logger.info(f"Available hardware accelerations: {available_hwaccels}")
+            
+            # Check for common hardware accelerations
+            if any(accel in available_hwaccels for accel in ['cuda', 'nvdec', 'nvenc']):
+                logger.info("NVIDIA GPU acceleration available")
+                return 'cuda'
+            elif any(accel in available_hwaccels for accel in ['vaapi', 'videotoolbox']):
+                logger.info("Other hardware acceleration available")
+                return 'auto'
+            else:
+                logger.info("No hardware acceleration detected, using CPU")
+                return None
+                
+        except subprocess.CalledProcessError:
+            logger.warning("Could not check hardware acceleration support")
+            return None
+    
     def _get_video_duration(self) -> float:
         """Get video duration in seconds using ffprobe."""
         try:
@@ -59,21 +86,33 @@ class Preprocessor:
             return 0.0
 
     def _get_frames(self):
-        """Extract frames from video with progress bar."""
+        """Extract frames from video with progress bar - optimized for speed."""
         logger.info(f"Getting frames from {self.video_path}")
         
         # Get video duration to estimate total frames
         duration = self._get_video_duration()
         estimated_frames = int(duration * FPS) if duration > 0 else None
         
-        # FFmpeg command - use stderr for progress to avoid conflicts
-        cmd = [
-            "ffmpeg", "-y",  # -y to overwrite existing files
+        # Check for hardware acceleration
+        hwaccel = self._check_hardware_acceleration()
+        
+        # Optimized FFmpeg command for maximum speed
+        cmd = ["ffmpeg", "-y"]  # -y to overwrite existing files
+        
+        # Add hardware acceleration if available
+        if hwaccel:
+            cmd.extend(["-hwaccel", hwaccel])
+            
+        cmd.extend([
             "-i", str(self.video_path),
-            "-vf", f"fps={FPS}",
+            "-vf", f"fps={FPS}",  # Use fps filter for better performance than -r
+            "-c:v", "mjpeg",  # Use MJPEG encoder for faster JPEG encoding
+            "-q:v", "3",  # High quality JPEG (1-31, lower = higher quality)
+            "-preset", "ultrafast",  # Fastest encoding preset
+            "-threads", "0",  # Use all available CPU threads
             "-stats",  # Enable statistics output
             str(self.output_path / "frame_%04d.jpg")
-        ]
+        ])
         
         # Initialize progress bar
         pbar = tqdm(
@@ -147,11 +186,62 @@ class Preprocessor:
         
         # Log final frame count
         actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
-        logger.info(f"Extracted {actual_frames} frames") 
+        logger.info(f"Extracted {actual_frames} frames")
 
-    def process(self, save_metadata: bool = True)->Path:
+    def _get_frames_fast(self):
+        """Ultra-fast frame extraction without progress tracking for maximum speed."""
+        logger.info(f"Getting frames from {self.video_path} (fast mode)")
+        
+        # Check for hardware acceleration
+        hwaccel = self._check_hardware_acceleration()
+        
+        # Ultra-optimized FFmpeg command for maximum speed
+        cmd = ["ffmpeg", "-y"]  # -y to overwrite existing files
+        
+        # Add hardware acceleration if available
+        if hwaccel:
+            cmd.extend(["-hwaccel", hwaccel])
+            
+        cmd.extend([
+            "-i", str(self.video_path),
+            "-vf", f"fps={FPS}",  # Use fps filter
+            "-c:v", "mjpeg",  # Use MJPEG encoder for fastest JPEG encoding
+            "-q:v", "5",  # Slightly lower quality for speed (1-31, lower = higher quality)
+            "-preset", "ultrafast",  # Fastest encoding preset
+            "-threads", "0",  # Use all available CPU threads
+            "-loglevel", "error",  # Reduce logging overhead
+            str(self.output_path / "frame_%04d.jpg")
+        ])
+        
+        try:
+            # Run without progress tracking for maximum speed
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            # Count extracted frames
+            actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
+            logger.info(f"Extracted {actual_frames} frames (fast mode)")
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg failed with return code {e.returncode}")
+            logger.error(f"Error output: {e.stderr}")
+            raise 
+
+    def process(self, save_metadata: bool = True, fast_mode: bool = False)->Path:
+        """
+        Process the video and extract frames.
+        
+        Args:
+            save_metadata: Whether to save metadata JSON file
+            fast_mode: If True, use ultra-fast extraction without progress tracking
+        """
         logger.info(f"Processing {self.video_path}")
-        self._get_frames()
+        
+        if fast_mode:
+            logger.info("Using fast extraction mode (no progress tracking)")
+            self._get_frames_fast()
+        else:
+            logger.info("Using regular extraction mode (with progress tracking)")
+            self._get_frames()
 
         if save_metadata:
             logger.info(f"Saving metadata to {self.output_path}")
@@ -216,5 +306,10 @@ class Preprocessor:
 
 
 if __name__ == "__main__":
-    preprocessor = Preprocessor(video_path=Path("data/video.mp4"), output_path=Path("data/images"))
-    preprocessor.process()
+    preprocessor = Preprocessor(video_path=Path("/home/ape/Documents/MapperGoProVids/tahoe_ridge_1.MP4"), output_path=Path("/tmp/images"))
+    
+    # Use fast mode for maximum speed (no progress tracking)
+    preprocessor.process(fast_mode=True)
+    
+    # Or use regular mode with progress tracking
+    # preprocessor.process(fast_mode=False)
