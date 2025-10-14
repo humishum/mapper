@@ -11,11 +11,15 @@ from pathlib import Path
 import argparse
 import logging
 import os
+import shutil
+import tempfile
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-IMAGE_LIMIT = 100 
+WINDOW_SIZE = 100 
+WINDOW_OVERLAP = 20 
+assert WINDOW_SIZE > WINDOW_OVERLAP, "WINDOW_SIZE must be greater than WINDOW_OVERLAP"
 
 class Constructor:
     def __init__(self, input_video_path:Path, output_path:Path):
@@ -29,36 +33,68 @@ class Constructor:
 
     def run(self, weights_path:Path, retrieval_path:Path, image_size:int):
         self._preprocess()
-        if len([image for image in self.image_dir_path.glob("*.jpg")]) >  IMAGE_LIMIT:
-            logger.info(f"Skipping 3D reconstruction for {self.input_video_path} because it has more than {IMAGE_LIMIT} images")
-            return
         self._run_3d_reconstruction(weights_path, retrieval_path, image_size)
         # self._align()
 
     def _preprocess(self):
         # Preprocess video into individual frames and metadata 
         preprocessor = Preprocessor(self.input_video_path, self.image_dir_path)
-        preprocessor.process()
+        preprocessor()
+      
 
     def _run_3d_reconstruction(self, weights_path:Path, retrieval_path:Path, image_size:int):
+
+        images = sorted(list(self.image_dir_path.glob('*')))
+        total_images = len(images)
+
+        window_size = WINDOW_SIZE
+        overlap = WINDOW_OVERLAP  
+
+        # Calculate the start indices for each window, ensuring overlap
+        window_starts = []
+        idx = 0
+        while idx < total_images:
+            window_starts.append(idx)
+            # Move the start index for the next window by (window_size - overlap)
+            # This ensures 'overlap' images overlap between consecutive windows
+            idx += window_size - overlap
+            if idx <= 0:  # Safety check to avoid infinite loops if overlap >= window_size
+                break
+        
+        logger.info(f"Total images found: {total_images} \n Splitting into total of {len(window_starts)} windows of size {window_size} with {overlap} overlap")
+
+        # Load model once
         must3r_wrapper = MuSt3RWrapper(
-            image_dir=self.image_dir_path, 
-            output_dir=self.pointcloud_dir_path, 
             weights_path=weights_path, 
             retrieval_path=retrieval_path, 
             image_size=image_size
         )
         must3r_wrapper.load_model()
-        must3r_wrapper.run()
+
+        for i, start_idx in enumerate(window_starts):
+            end_idx = min(start_idx + window_size, total_images)
+            window_images = images[start_idx:end_idx]
+
+            with tempfile.TemporaryDirectory() as temp_img_dir:
+                temp_img_dir_path = Path(temp_img_dir)
+
+                # Copy images to temp directory
+                for img_path in window_images:
+                    shutil.copy(img_path, temp_img_dir_path / img_path.name)
+                
+                # Make window-specific pointcloud output directory
+                sequence_dir_name = f"sequence_{i+1}"
+                sequence_output_dir = self.pointcloud_dir_path / sequence_dir_name
+                os.makedirs(sequence_output_dir, exist_ok=True)
+                
+                logger.info(f"Running 3D reconstruction for {sequence_dir_name} with {len(window_images)} images.")
+                must3r_wrapper.run(temp_img_dir_path, sequence_output_dir)
 
     def _align(self): 
         alinged_output_path = self.output_path/ "aligned"
         aligner = Aligner(self.output_path, alinged_output_path)
         aligner.align() 
         
-
-
-
 
 def main():
     parser = argparse.ArgumentParser(description="Construct pointcloud from video")

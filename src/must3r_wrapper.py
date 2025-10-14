@@ -17,11 +17,8 @@ class MuSt3RWrapper:
     Wrapper for the MuSt3R model
     """
 
-    def __init__(self, image_dir:Path, output_dir:Path, weights_path:Path ,retrieval_path:Path, image_size:int):
+    def __init__(self, weights_path:Path , retrieval_path:Path, image_size:int):
         
-        self.image_dir = image_dir
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
         self.image_size = image_size
         self.weights_path = weights_path
         self.retrieval_path = retrieval_path
@@ -35,7 +32,7 @@ class MuSt3RWrapper:
         self.model = load_model(self.weights_path, encoder=None, decoder=None, device='cuda',
                        img_size=self.image_size, memory_mode=None)
 
-    def run(self):
+    def run(self, image_dir:Path, output_dir:Path):
         """
         Run the reconstruction process using the predefined parameters.
         Outputs PLY files for the reconstructed scene.
@@ -43,10 +40,11 @@ class MuSt3RWrapper:
         if self.model is None:
             self.load_model()
         
+        os.makedirs(output_dir, exist_ok=True)
         # Get sorted list of images from the image directory
-        images = sorted([os.path.join(self.image_dir, f)
-                        for f in os.listdir(self.image_dir)
-                        if os.path.isfile(os.path.join(self.image_dir, f))])
+        images = sorted([os.path.join(image_dir, f)
+                        for f in os.listdir(image_dir)
+                        if os.path.isfile(os.path.join(image_dir, f))])
         
         # Default parameters (matching get_reconstruction.py defaults)
         num_mem_imgs = min(50, len(images))
@@ -55,9 +53,9 @@ class MuSt3RWrapper:
         execution_mode = "linseq"
         camera_conf_thr = 0.0
         num_refinements_iterations = 0
-        logger.info(f"Image Path: {self.image_dir}")
+        logger.info(f"Image Path: {image_dir}")
         logger.info(f"Running reconstruction with {len(images)} images")
-        logger.info(f"Output directory: {self.output_dir}")
+        logger.info(f"Output directory: {output_dir}")
         logger.info(f"Retrieval path: {self.retrieval_path}")
         logger.info(f"Weights path: {self.weights_path}")
         logger.info(f"Image size: {self.image_size}")
@@ -72,7 +70,7 @@ class MuSt3RWrapper:
         logger.info(f"Retrieval path: {self.retrieval_path}")
         # Run reconstruction
         scene, outfile = get_reconstructed_scene(
-            outdir=self.output_dir, 
+            outdir=output_dir, 
             viser_server=None, 
             should_save_glb=True,
             model=self.model,
@@ -109,7 +107,7 @@ class MuSt3RWrapper:
             try:
                 logger.info(f"Generating PLY file with confidence threshold {thr}")
                 outfile = get_3D_model_from_scene(
-                    outdir=self.output_dir, 
+                    outdir=output_dir, 
                     verbose=True, 
                     scene=scene, 
                     min_conf_thr=thr,
@@ -123,7 +121,7 @@ class MuSt3RWrapper:
                 pass
         
         # Save scene as pickle file
-        with open(os.path.join(self.output_dir, 'scene.pkl'), 'wb') as f:
+        with open(os.path.join(output_dir, 'scene.pkl'), 'wb') as f:
             pickle.dump(scene, f)
         
         return scene

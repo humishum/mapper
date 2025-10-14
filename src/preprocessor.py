@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Hyperparameters 
 FPS = 10
+JPEG_QUALITY = 5  # JPEG quality for frame extraction (1-31, lower = higher quality)
 
 
 class Preprocessor:
@@ -31,13 +32,12 @@ class Preprocessor:
         self._check_ffmpeg_installed()
         
 
-    def __call__(self, save_metadata: bool = True, fast_mode: bool = False)->Path:
+    def __call__(self, save_metadata: bool = True)->Path:
         """
         Process the video and extract frames.
         
         Args:
             save_metadata: Whether to save metadata JSON file
-            fast_mode: If True, use fast extraction without progress tracking
         """
         logger.info(f"Processing {self.video_path}")
         
@@ -45,12 +45,7 @@ class Preprocessor:
             logger.info(f"Frames already cached at {self.output_path}")
             return
         
-        if fast_mode:
-            logger.info("Using fast extraction mode (no progress tracking)")
-            self._get_frames_fast()
-        else:
-            logger.info("Using regular extraction mode (with progress tracking)")
-            self._get_frames()
+        self._get_frames()
 
         if save_metadata:
             logger.info(f"Saving metadata to {self.output_path}")
@@ -157,7 +152,7 @@ class Preprocessor:
             "-i", str(self.video_path),
             "-vf", f"fps={FPS}",  # Use fps filter for better performance than -r
             "-c:v", "mjpeg",  # Use MJPEG encoder for faster JPEG encoding
-            "-q:v", "3",  # High quality JPEG (1-31, lower = higher quality)
+            "-q:v", str(JPEG_QUALITY),  # JPEG quality (1-31, lower = higher quality)
             "-preset", "ultrafast",  # Fastest encoding preset
             "-threads", "0",  # Use all available CPU threads
             "-stats",  # Enable statistics output
@@ -238,44 +233,6 @@ class Preprocessor:
         actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
         logger.info(f"Extracted {actual_frames} frames")
 
-    def _get_frames_fast(self):
-        """Ultra-fast frame extraction without progress tracking for maximum speed."""
-        logger.info(f"Getting frames from {self.video_path} (fast mode)")
-        
-        # Check for hardware acceleration
-        hwaccel = self._check_hardware_acceleration()
-        
-        cmd = ["ffmpeg", "-y"]  # -y to overwrite existing files
-        
-        # Add hardware acceleration if available
-        if hwaccel:
-            cmd.extend(["-hwaccel", hwaccel])
-            
-        cmd.extend([
-            "-i", str(self.video_path),
-            "-vf", f"fps={FPS}",  # Use fps filter
-            "-c:v", "mjpeg",  # Use MJPEG encoder for fastest JPEG encoding
-            "-q:v", "5",  # Slightly lower quality for speed (1-31, lower = higher quality)
-            "-preset", "ultrafast",  # Fastest encoding preset
-            "-threads", "0",  # Use all available CPU threads
-            "-loglevel", "error",  # Reduce logging overhead
-            str(self.output_path / "frame_%04d.jpg")
-        ])
-        
-        try:
-            # Run without progress tracking for maximum speed
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            # Count extracted frames
-            actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
-            logger.info(f"Extracted {actual_frames} frames (fast mode)")
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg failed with return code {e.returncode}")
-            logger.error(f"Error output: {e.stderr}")
-            raise 
-
-
     def _get_initial_gps_coordinates(self)->Tuple[float, float]:
         # Use ffmpeg to get GPS coordinates, if present 
         try:
@@ -336,9 +293,4 @@ class Preprocessor:
 
 if __name__ == "__main__":
     preprocessor = Preprocessor(video_path=Path("/home/ape/Documents/MapperGoProVids/tahoe_ridge_1.MP4"), output_path=Path("/tmp/images"))
-    
-    # Use fast mode for maximum speed (no progress tracking)
-    preprocessor.process(fast_mode=True)
-    
-    # Or use regular mode with progress tracking
-    # preprocessor.process(fast_mode=False)
+    preprocessor()
