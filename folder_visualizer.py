@@ -57,34 +57,54 @@ def get_pointclouds(base_dir):
     Returns a dict:
     {
         'scene1': {
-            'thresholds': [0.1, 0.2, ...],
-            'files': {'0.1': '/path/to/scene1_thr0.1.ply', ...}
+            'sequences': {
+                'sequence_1': {
+                    'thresholds': [1.0, 2.0, ...],
+                    'files': {'1.0': '/path/to/scene1/pointclouds/sequence_1/scene_thr1.0.ply', ...}
+                },
+                'sequence_2': {...},
+                ...
+            }
         },
         ...
     }
     """
     result = {}
-    for scene_dir in glob.glob(os.path.join(base_dir, "*", "pointclouds")):
-        scene_name = os.path.basename(os.path.dirname(scene_dir))
-        ply_files = glob.glob(os.path.join(scene_dir, "*.ply"))
-        thresholds = []
-        files = {}
-        for pf in ply_files:
-            m = re.search(r"_thr([0-9.]+)", pf)
-            if m:
-                thr = m.group(1)
-                thresholds.append(thr)
-                files[thr] = pf
-        if thresholds:
-            thresholds = sorted(thresholds)
-            result[scene_name] = {
-                "thresholds": thresholds,
-                "files": files
-            }
+    # Look for directories with pointclouds subdirectory
+    for pointcloud_dir in glob.glob(os.path.join(base_dir, "*", "pointclouds")):
+        scene_name = os.path.basename(os.path.dirname(pointcloud_dir))
+        
+        # Look for sequence_* subdirectories
+        sequence_dirs = glob.glob(os.path.join(pointcloud_dir, "sequence_*"))
+        
+        if sequence_dirs:
+            sequences = {}
+            for seq_dir in sequence_dirs:
+                seq_name = os.path.basename(seq_dir)
+                ply_files = glob.glob(os.path.join(seq_dir, "*.ply"))
+                
+                thresholds = []
+                files = {}
+                for pf in ply_files:
+                    m = re.search(r"_thr([0-9]+(?:\.[0-9]+)?)", pf)
+                    if m:
+                        thr_float = float(m.group(1))
+                        thresholds.append(thr_float)
+                        files[thr_float] = pf
+                if thresholds:
+                    thresholds = sorted(thresholds, reverse=True)  # Sort numerically, highest first
+                    sequences[seq_name] = {
+                        "thresholds": thresholds,
+                        "files": files
+                    }
+            
+            if sequences:
+                result[scene_name] = {"sequences": sequences}
+    
     return result
 
 # Set your base directory here
-BASE_DIR = "/home/ape/repos/mapper/data/output_100425/"
+BASE_DIR = "/home/ape/repos/mapper/data/output_102425/"
 
 pointclouds = get_pointclouds(BASE_DIR)
 
@@ -102,65 +122,126 @@ app.layout = dbc.Container([
             ),
         ], width=3),
         dbc.Col([
-            html.Label("Thresholds (select two):"),
+            html.Label("Sequences (select multiple):"),
+            dcc.Dropdown(
+                id="sequence-dropdown",
+                multi=True
+            ),
+        ], width=4),
+        dbc.Col([
+            html.Label("Thresholds (select multiple):"),
             dcc.Dropdown(
                 id="threshold-dropdown",
                 multi=True
             ),
-        ], width=6),
+        ], width=3),
         dbc.Col([
-            html.Button("Show", id="show-btn", n_clicks=0, className="btn btn-primary mt-4")
-        ], width=3)
+            html.Button("Load Pointclouds", id="load-btn", n_clicks=0, className="btn btn-primary mt-4")
+        ], width=2)
     ]),
     html.Hr(),
     dbc.Row([
         dbc.Col([
-            html.Div(id="plot1-container")
-        ], width=6),
-        dbc.Col([
-            html.Div(id="plot2-container")
-        ], width=6)
-    ])
+            html.Label("Toggle Visibility:"),
+            dcc.Checklist(
+                id="visibility-checklist",
+                options=[],
+                value=[],
+                labelStyle={"display": "block", "margin": "5px"}
+            )
+        ], width=12)
+    ], id="toggle-row", style={"display": "none"}),
+    html.Hr(id="toggle-hr", style={"display": "none"}),
+    html.Div(id="plots-container")
 ], fluid=True)
+
+@app.callback(
+    Output("sequence-dropdown", "options"),
+    Output("sequence-dropdown", "value"),
+    Input("scene-dropdown", "value")
+)
+def update_sequences(scene):
+    if not scene or scene not in pointclouds:
+        return [], []
+    sequences = pointclouds[scene]["sequences"]
+    # Sort sequence names naturally (sequence_1, sequence_2, etc.)
+    seq_names = sorted(sequences.keys(), key=lambda x: int(x.split('_')[1]) if '_' in x else 0)
+    options = [{"label": s, "value": s} for s in seq_names]
+    # Default: select first sequence
+    value = [seq_names[0]] if seq_names else []
+    return options, value
 
 @app.callback(
     Output("threshold-dropdown", "options"),
     Output("threshold-dropdown", "value"),
-    Input("scene-dropdown", "value")
+    Input("scene-dropdown", "value"),
+    Input("sequence-dropdown", "value")
 )
-def update_thresholds(scene):
+def update_thresholds(scene, sequences):
     if not scene or scene not in pointclouds:
         return [], []
-    thrs = pointclouds[scene]["thresholds"]
+    if not sequences or len(sequences) == 0:
+        return [], []
+    
+    # Collect all unique thresholds across selected sequences
+    all_thresholds = set()
+    for seq in sequences:
+        if seq in pointclouds[scene]["sequences"]:
+            all_thresholds.update(pointclouds[scene]["sequences"][seq]["thresholds"])
+    
+    # Sort thresholds numerically, highest first
+    thrs = sorted(list(all_thresholds), reverse=True)
     options = [{"label": str(t), "value": str(t)} for t in thrs]
     # Default: select first two thresholds if available
     value = [str(thrs[0]), str(thrs[1])] if len(thrs) >= 2 else [str(thrs[0])] if thrs else []
     return options, value
 
 @app.callback(
-    Output("plot1-container", "children"),
-    Output("plot2-container", "children"),
-    Input("show-btn", "n_clicks"),
+    Output("plots-container", "children"),
+    Output("visibility-checklist", "options"),
+    Output("visibility-checklist", "value"),
+    Output("toggle-row", "style"),
+    Output("toggle-hr", "style"),
+    Input("load-btn", "n_clicks"),
     State("scene-dropdown", "value"),
-    State("threshold-dropdown", "value")
+    State("sequence-dropdown", "value"),
+    State("threshold-dropdown", "value"),
+    prevent_initial_call=True
 )
-def update_plots(n_clicks, scene, thresholds):
-    print(f"DEBUG: update_plots called with n_clicks={n_clicks}, scene={scene}, thresholds={thresholds}")
+def load_pointclouds(n_clicks, scene, sequences, thresholds):
+    print(f"DEBUG: load_pointclouds called with n_clicks={n_clicks}, scene={scene}, sequences={sequences}, thresholds={thresholds}")
     
-    if not scene or not thresholds or len(thresholds) < 1:
-        print("DEBUG: Early return - missing scene or thresholds")
-        return html.Div("Select a scene and at least one threshold."), ""
+    if not scene or not sequences or not thresholds or len(sequences) < 1 or len(thresholds) < 1:
+        print("DEBUG: Early return - missing scene, sequences or thresholds")
+        return html.Div("Select a scene, at least one sequence, and at least one threshold."), [], [], {"display": "none"}, {"display": "none"}
     
-    print(f"DEBUG: Processing scene '{scene}' with thresholds {thresholds}")
-    files = pointclouds[scene]["files"]
-    print(f"DEBUG: Available files: {files}")
+    print(f"DEBUG: Processing scene '{scene}' with sequences {sequences} and thresholds {thresholds}")
     
-    plots = []
-    for i in range(2):
-        if i < len(thresholds):
-            thr = thresholds[i]
-            ply_path = files.get(thr)
-            print(f"DEBUG: Processing threshold {thr}, path: {ply_path}")
+    all_plots = []
+    checklist_options = []
+    checklist_values = []
+    
+    # Create plots for each combination of sequence and threshold
+    for seq in sequences:
+        if seq not in pointclouds[scene]["sequences"]:
+            print(f"DEBUG: Skipping invalid sequence {seq}")
+            continue
+            
+        files = pointclouds[scene]["sequences"][seq]["files"]
+        
+        for thr_str in thresholds:
+            thr_float = float(thr_str)
+            
+            # Skip if this threshold doesn't exist for this sequence
+            if thr_float not in files:
+                print(f"DEBUG: Threshold {thr_str} not available for {seq}, skipping")
+                continue
+            
+            ply_path = files.get(thr_float)
+            plot_id = f"{seq}_thr{thr_str}"
+            plot_label = f"{seq} - thr={thr_str}"
+            
+            print(f"DEBUG: Processing {plot_label}, path: {ply_path}")
             
             if ply_path and os.path.exists(ply_path):
                 try:
@@ -187,26 +268,74 @@ def update_plots(n_clicks, scene, thresholds):
                             xaxis_title='X', yaxis_title='Y', zaxis_title='Z',
                             aspectmode='data'
                         ),
-                        title=f"{scene} - thr={thr}"
+                        title=f"{scene} - {plot_label}"
                     )
                     
                     print("DEBUG: Creating graph component...")
-                    plots.append(dcc.Graph(figure=fig, style={"height": "70vh"}))
-                    print(f"DEBUG: Successfully created plot for threshold {thr}")
+                    # Wrap each plot in a div with unique ID for toggling
+                    plot_div = html.Div([
+                        dcc.Graph(figure=fig, style={"height": "600px"})
+                    ], id={"type": "plot-div", "index": plot_id}, style={"display": "block"})
+                    
+                    all_plots.append(plot_div)
+                    checklist_options.append({"label": plot_label, "value": plot_id})
+                    checklist_values.append(plot_id)  # All visible by default
+                    
+                    print(f"DEBUG: Successfully created plot for {plot_label}")
                     
                 except Exception as e:
                     print(f"ERROR: Failed to process PLY file {ply_path}: {str(e)}")
                     import traceback
                     traceback.print_exc()
-                    plots.append(html.Div(f"Error loading PLY file for threshold {thr}: {str(e)}"))
+                    all_plots.append(html.Div(f"Error loading PLY file for {plot_label}: {str(e)}"))
             else:
                 print(f"DEBUG: PLY file not found or doesn't exist: {ply_path}")
-                plots.append(html.Div(f"PLY file not found for threshold {thr}"))
-        else:
-            plots.append(html.Div("No threshold selected."))
+                all_plots.append(html.Div(f"PLY file not found for {plot_label}"))
     
-    print("DEBUG: Returning plots...")
-    return plots[0], plots[1]
+    # Calculate responsive column width based on number of plots
+    num_plots = len(all_plots)
+    if num_plots == 0:
+        return html.Div("No valid pointcloud combinations found."), [], [], {"display": "none"}, {"display": "none"}
+    
+    # Create responsive grid layout
+    if num_plots == 1:
+        col_width = 12
+    elif num_plots == 2:
+        col_width = 6
+    elif num_plots <= 4:
+        col_width = 6
+    else:
+        col_width = 4
+    
+    # Wrap plots in Bootstrap columns
+    plot_cols = [dbc.Col(plot, width=col_width) for plot in all_plots]
+    plots_grid = dbc.Row(plot_cols)
+    
+    print(f"DEBUG: Returning {num_plots} plots")
+    return plots_grid, checklist_options, checklist_values, {"display": "block"}, {"display": "block"}
+
+# Callback to toggle visibility of plots without reloading
+@app.callback(
+    Output({"type": "plot-div", "index": dash.dependencies.ALL}, "style"),
+    Input("visibility-checklist", "value"),
+    State({"type": "plot-div", "index": dash.dependencies.ALL}, "id"),
+    prevent_initial_call=True
+)
+def toggle_plot_visibility(selected_plots, plot_ids):
+    """Toggle visibility of plots based on checklist - instant with no reloading"""
+    print(f"DEBUG: toggle_plot_visibility called with selected_plots={selected_plots}")
+    
+    styles = []
+    for plot_id_dict in plot_ids:
+        plot_id = plot_id_dict["index"]
+        if plot_id in selected_plots:
+            # Show the plot
+            styles.append({"display": "block"})
+        else:
+            # Hide the plot
+            styles.append({"display": "none"})
+    
+    return styles
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8050)
