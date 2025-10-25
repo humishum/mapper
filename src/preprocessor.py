@@ -11,6 +11,7 @@ import shutil
 import re
 from tqdm import tqdm
 import time
+import exiftool
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class Preprocessor:
         self._cached = self._check_cached()
         self._check_paths()
         self._check_ffmpeg_installed()
+        self._check_exiftool_installed()
         
 
     def __call__(self, save_metadata: bool = True)->Path:
@@ -89,6 +91,13 @@ class Preprocessor:
             subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError:
             raise RuntimeError("FFmpeg is not installed. Please install FFmpeg and try again.")
+    
+    def _check_exiftool_installed(self):
+        try:
+            logger.info(f"Checking if ExifTool is installed")
+            subprocess.run(["exiftool", "-ver"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            raise RuntimeError("ExifTool is not installed. Please install ExifTool and try again.")
     
     def _check_hardware_acceleration(self):
         """Check if hardware acceleration is available."""
@@ -233,56 +242,87 @@ class Preprocessor:
         actual_frames = len(list(self.output_path.glob("frame_*.jpg")))
         logger.info(f"Extracted {actual_frames} frames")
 
-    def _get_initial_gps_coordinates(self)->Tuple[float, float]:
-        # Use ffmpeg to get GPS coordinates, if present 
+    def _read_exif_data(self) -> dict:
+        """Read EXIF data from video file using exiftool and save to a class variable."""
+        if hasattr(self, "exif_data") and self.exif_data is not None:
+            return self.exif_data
         try:
-            # Try to extract GPS coordinates using ffprobe (part of ffmpeg)
-            logger.info(f"Extracting GPS coordinates from {self.video_path}")
-            result = subprocess.run([
-                "ffprobe", "-v", "quiet", "-select_streams", "v:0", 
-                "-show_entries", "format_tags=location", "-of", "csv=p=0", 
-                str(self.video_path)
-            ], capture_output=True, text=True, check=True)
-            
-            location = result.stdout.strip()
-            if location and location != "N/A":
-                # Parse location string (format: +37.5090+127.0243/)
-                import re
-                match = re.match(r'([+-]\d+\.\d+)([+-]\d+\.\d+)', location)
-                if match:
-                    lat, lon = float(match.group(1)), float(match.group(2))
-                    return lat, lon
-        except (subprocess.CalledProcessError, ValueError, AttributeError):
-            pass
+            with exiftool.ExifTool() as et:
+                output = et.execute(b"-j", str(self.video_path).encode('utf-8'))
+                metadata = json.loads(output)
+                self.exif_data = metadata[0] if metadata else {}
+                return self.exif_data
+        except (Exception, json.JSONDecodeError) as e:
+            logger.warning(f"Could not read EXIF data from {self.video_path}: {e}")
+            self.exif_data = {}
+            return self.exif_data
+
+    def _get_gps_data(self) -> Tuple[float, float, float]:
+        """Extract GPS coordinates and altitude using exiftool.
         
-        return 0.0, 0.0
+        Returns:
+            Tuple of (latitude, longitude, altitude)
+        """
+        try:
+            logger.info(f"Extracting GPS data from {self.video_path}")
+            exif_data = self._read_exif_data()
+            
+            # Initialize default values
+            lat, lon, alt = 0.0, 0.0, 0.0
+            
+            # First try the combined GPSCoordinates field (most reliable for iPhone videos)
+            if 'QuickTime:GPSCoordinates' in exif_data:
+                gps_coords = exif_data['QuickTime:GPSCoordinates']
+                if gps_coords and gps_coords != "N/A":
+                    # Parse format: "36.7928 -118.5869 1524.387"
+                    coords = gps_coords.split()
+                    if len(coords) >= 2:
+                        lat, lon = float(coords[0]), float(coords[1])
+                    if len(coords) >= 3:
+                        alt = float(coords[2])
+                    return lat, lon, alt
+            
+            # Try individual latitude/longitude fields
+            for field in ['Composite:GPSLatitude', 'GPS:GPSLatitude']:
+                if field in exif_data and exif_data[field] != "N/A":
+                    lat = float(exif_data[field])
+                    break
+                    
+            for field in ['Composite:GPSLongitude', 'GPS:GPSLongitude']:
+                if field in exif_data and exif_data[field] != "N/A":
+                    lon = float(exif_data[field])
+                    break
+            
+            # Try individual altitude fields
+            for field in ['Composite:GPSAltitude', 'GPS:GPSAltitude']:
+                if field in exif_data and exif_data[field] != "N/A":
+                    alt = float(exif_data[field])
+                    break
+            
+            return lat, lon, alt
+                
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning(f"Could not parse GPS data: {e}")
+            return 0.0, 0.0, 0.0
     
-    def _get_altitude(self)->float:
-        # Use ffmpeg to get altitude, if present 
-        try:
-            result = subprocess.run([
-                "ffprobe", "-v", "quiet", "-select_streams", "v:0", 
-                "-show_entries", "format_tags=altitude", "-of", "csv=p=0", 
-                str(self.video_path)
-            ], capture_output=True, text=True, check=True)
-            
-            altitude = result.stdout.strip()
-            if altitude and altitude != "N/A":
-                return float(altitude)
-        except (subprocess.CalledProcessError, ValueError, AttributeError):
-            pass
-        
-        return 0.0
     
     def _save_metadata(self)->dict:
+        # Get GPS data once and extract coordinates and altitude
+        lat, lon, alt = self._get_gps_data()
+        
         metadata = {
             "fps": FPS,
             "video_name": self.video_path.name,
             "video_type": self.video_path.suffix,
             "video_size": self.video_path.stat().st_size,
+            "video_create_date": self.exif_data['QuickTime:CreationDate'],
+            "camera_make": self.exif_data['QuickTime:Make'],
+            "camera_model": self.exif_data['QuickTime:Model'],
+            "camera_lens_model": self.exif_data['QuickTime:CameraLensModel'],
+            "camera_focal_length_35mm_equivalent": self.exif_data['QuickTime:CameraFocalLength35mmEquivalent'],
             "output_path": str(self.output_path),
-            "initial_gps_coordinates": self._get_initial_gps_coordinates(),
-            "altitude": self._get_altitude(),
+            "initial_gps_coordinates": (lat, lon),
+            "altitude": alt,
             "frames": len(list(self.output_path.glob("*.jpg")))
         }
         # Save to json at output path 
