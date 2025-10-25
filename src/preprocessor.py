@@ -315,11 +315,31 @@ class Preprocessor:
             "video_name": self.video_path.name,
             "video_type": self.video_path.suffix,
             "video_size": self.video_path.stat().st_size,
-            "video_create_date": self.exif_data['QuickTime:CreationDate'],
-            "camera_make": self.exif_data['QuickTime:Make'],
-            "camera_model": self.exif_data['QuickTime:Model'],
-            "camera_lens_model": self.exif_data['QuickTime:CameraLensModel'],
-            "camera_focal_length_35mm_equivalent": self.exif_data['QuickTime:CameraFocalLength35mmEquivalent'],
+            "video_create_date": (
+                self.exif_data.get('QuickTime:CreationDate')
+                or self.exif_data.get('QuickTime:CreateDate')
+                or self.exif_data.get('File:FileModifyDate')
+                or None
+            ),
+            "camera_make": (
+                self.exif_data.get('QuickTime:Make')
+                or self.exif_data.get('QuickTime:DeviceManufacturer')
+                or None
+            ),
+            "camera_model": (
+                self.exif_data.get('QuickTime:Model')
+                or self.exif_data.get('QuickTime:DeviceModelName')
+                or None
+            ),
+            "camera_lens_model": (
+                self.exif_data.get('QuickTime:CameraLensModel')
+                or self.exif_data.get('QuickTime:LensSerialNumber')
+                or None
+            ),
+            "camera_focal_length_35mm_equivalent": (
+                self.exif_data.get('QuickTime:CameraFocalLength35mmEquivalent')
+                or None
+            ),
             "output_path": str(self.output_path),
             "initial_gps_coordinates": (lat, lon),
             "altitude": alt,
