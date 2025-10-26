@@ -8,7 +8,7 @@ from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 
-def parse_ply(filename, max_points=100000):
+def parse_ply(filename, max_points=300000):
     """Parse a PLY file using Open3D and return vertices (N,3) and colors (N,3) as numpy arrays."""
     print(f"DEBUG: parse_ply called with filename: {filename}, max_points: {max_points}")
     
@@ -122,14 +122,24 @@ app.layout = dbc.Container([
             ),
         ], width=3),
         dbc.Col([
-            html.Label("Sequences (select multiple):"),
+            html.Div([
+                html.Label("Sequences (select multiple):"),
+                html.Button("Select All", id="select-all-sequences-btn", n_clicks=0, 
+                           className="btn btn-sm btn-outline-secondary", 
+                           style={"marginLeft": "10px", "marginBottom": "5px"})
+            ], style={"display": "flex", "alignItems": "center"}),
             dcc.Dropdown(
                 id="sequence-dropdown",
                 multi=True
             ),
         ], width=4),
         dbc.Col([
-            html.Label("Thresholds (select multiple):"),
+            html.Div([
+                html.Label("Thresholds (select multiple):"),
+                html.Button("Select All", id="select-all-thresholds-btn", n_clicks=0, 
+                           className="btn btn-sm btn-outline-secondary", 
+                           style={"marginLeft": "10px", "marginBottom": "5px"})
+            ], style={"display": "flex", "alignItems": "center"}),
             dcc.Dropdown(
                 id="threshold-dropdown",
                 multi=True
@@ -158,16 +168,30 @@ app.layout = dbc.Container([
 @app.callback(
     Output("sequence-dropdown", "options"),
     Output("sequence-dropdown", "value"),
-    Input("scene-dropdown", "value")
+    Input("scene-dropdown", "value"),
+    Input("select-all-sequences-btn", "n_clicks"),
+    State("sequence-dropdown", "options"),
+    prevent_initial_call="partial"
 )
-def update_sequences(scene):
+def update_sequences(scene, select_all_clicks, current_options):
+    ctx = dash.callback_context
+    
     if not scene or scene not in pointclouds:
         return [], []
+    
     sequences = pointclouds[scene]["sequences"]
     # Sort sequence names naturally (sequence_1, sequence_2, etc.)
     seq_names = sorted(sequences.keys(), key=lambda x: int(x.split('_')[1]) if '_' in x else 0)
     options = [{"label": s, "value": s} for s in seq_names]
-    # Default: select first sequence
+    
+    # Check what triggered the callback
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == "select-all-sequences-btn":
+            # Select all sequences
+            return options, seq_names
+    
+    # Default: select first sequence (when scene changes)
     value = [seq_names[0]] if seq_names else []
     return options, value
 
@@ -175,9 +199,14 @@ def update_sequences(scene):
     Output("threshold-dropdown", "options"),
     Output("threshold-dropdown", "value"),
     Input("scene-dropdown", "value"),
-    Input("sequence-dropdown", "value")
+    Input("sequence-dropdown", "value"),
+    Input("select-all-thresholds-btn", "n_clicks"),
+    State("threshold-dropdown", "options"),
+    prevent_initial_call="partial"
 )
-def update_thresholds(scene, sequences):
+def update_thresholds(scene, sequences, select_all_clicks, current_options):
+    ctx = dash.callback_context
+    
     if not scene or scene not in pointclouds:
         return [], []
     if not sequences or len(sequences) == 0:
@@ -191,7 +220,16 @@ def update_thresholds(scene, sequences):
     
     # Sort thresholds numerically, highest first
     thrs = sorted(list(all_thresholds), reverse=True)
+    thrs_str = [str(t) for t in thrs]
     options = [{"label": str(t), "value": str(t)} for t in thrs]
+    
+    # Check what triggered the callback
+    if ctx.triggered:
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if trigger_id == "select-all-thresholds-btn":
+            # Select all thresholds
+            return options, thrs_str
+    
     # Default: select first two thresholds if available
     value = [str(thrs[0]), str(thrs[1])] if len(thrs) >= 2 else [str(thrs[0])] if thrs else []
     return options, value
@@ -273,9 +311,17 @@ def load_pointclouds(n_clicks, scene, sequences, thresholds):
                     
                     print("DEBUG: Creating graph component...")
                     # Wrap each plot in a div with unique ID for toggling
+                    # Using flex-basis for responsive width
                     plot_div = html.Div([
                         dcc.Graph(figure=fig, style={"height": "600px"})
-                    ], id={"type": "plot-div", "index": plot_id}, style={"display": "block"})
+                    ], id={"type": "plot-div", "index": plot_id}, 
+                    style={
+                        "flex": "1 1 400px",  # Grow, shrink, min-width 400px
+                        "minWidth": "400px",
+                        "maxWidth": "100%",
+                        "padding": "10px",
+                        "boxSizing": "border-box"
+                    })
                     
                     all_plots.append(plot_div)
                     checklist_options.append({"label": plot_label, "value": plot_id})
@@ -297,19 +343,17 @@ def load_pointclouds(n_clicks, scene, sequences, thresholds):
     if num_plots == 0:
         return html.Div("No valid pointcloud combinations found."), [], [], {"display": "none"}, {"display": "none"}
     
-    # Create responsive grid layout
-    if num_plots == 1:
-        col_width = 12
-    elif num_plots == 2:
-        col_width = 6
-    elif num_plots <= 4:
-        col_width = 6
-    else:
-        col_width = 4
-    
-    # Wrap plots in Bootstrap columns
-    plot_cols = [dbc.Col(plot, width=col_width) for plot in all_plots]
-    plots_grid = dbc.Row(plot_cols)
+    # Create flex container that automatically reflows when plots are hidden
+    plots_grid = html.Div(
+        all_plots,
+        style={
+            "display": "flex",
+            "flexWrap": "wrap",
+            "justifyContent": "flex-start",
+            "alignItems": "flex-start",
+            "gap": "0px"
+        }
+    )
     
     print(f"DEBUG: Returning {num_plots} plots")
     return plots_grid, checklist_options, checklist_values, {"display": "block"}, {"display": "block"}
@@ -329,10 +373,17 @@ def toggle_plot_visibility(selected_plots, plot_ids):
     for plot_id_dict in plot_ids:
         plot_id = plot_id_dict["index"]
         if plot_id in selected_plots:
-            # Show the plot
-            styles.append({"display": "block"})
+            # Show the plot with flex properties
+            styles.append({
+                "flex": "1 1 400px",
+                "minWidth": "400px",
+                "maxWidth": "100%",
+                "padding": "10px",
+                "boxSizing": "border-box",
+                "display": "block"
+            })
         else:
-            # Hide the plot
+            # Hide the plot completely (removed from flex layout)
             styles.append({"display": "none"})
     
     return styles
