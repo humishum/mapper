@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import tempfile
+import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -35,6 +36,20 @@ class Constructor:
         self._preprocess()
         self._run_3d_reconstruction(weights_path, retrieval_path, image_size)
         # self._align()
+        self._mark_done()
+
+    def _mark_done(self):
+        """Update metadata.json with completed flag to indicate successful completion."""
+        metadata_path = self.output_path / "metadata.json"
+        if metadata_path.exists():
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+        else:
+            metadata = {}
+        metadata["completed"] = True
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        logger.info(f"Marked as complete in: {metadata_path}")
 
     def _preprocess(self):
         # Preprocess video into individual frames and metadata 
