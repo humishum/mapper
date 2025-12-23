@@ -1,0 +1,2 @@
+# Must3r command
+uv run src/process_folder.py --folder <> --output_folder <> --weights_path /workspace/repos/mapper/weights/MUSt3R_512_cvpr.pth --retrieval_path /workspace/repos/mapper/weights/MUSt3R_512_retrieval_trainingfree.pth --image_size 512

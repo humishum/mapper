@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Hyperparameters 
 FPS = 10
-JPEG_QUALITY = 5  # JPEG quality for frame extraction (1-31, lower = higher quality)
+JPEG_QUALITY = 10  # JPEG quality for frame extraction (1-31, lower = higher quality)
 
 
 class Preprocessor:
@@ -160,9 +160,10 @@ class Preprocessor:
         cmd.extend([
             "-i", str(self.video_path),
             "-vf", f"fps={FPS}",  # Use fps filter for better performance than -r
-            "-c:v", "mjpeg",  # Use MJPEG encoder for faster JPEG encoding
+            "-an -sn -dn", # skip audio and other streams
+            # "-c:v", "mjpeg",  # Use MJPEG encoder for faster JPEG encoding
             "-q:v", str(JPEG_QUALITY),  # JPEG quality (1-31, lower = higher quality)
-            "-preset", "ultrafast",  # Fastest encoding preset
+            # "-preset", "ultrafast",  # Fastest encoding preset
             "-threads", "0",  # Use all available CPU threads
             "-stats",  # Enable statistics output
             str(self.output_path / "frame_%04d.jpg")

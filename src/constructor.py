@@ -18,7 +18,7 @@ import json
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-WINDOW_SIZE = 100 
+WINDOW_SIZE = 500
 WINDOW_OVERLAP = 20 
 assert WINDOW_SIZE > WINDOW_OVERLAP, "WINDOW_SIZE must be greater than WINDOW_OVERLAP"
 

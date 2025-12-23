@@ -72,7 +72,7 @@ class MuSt3RWrapper:
         scene, outfile = get_reconstructed_scene(
             outdir=output_dir, 
             viser_server=None, 
-            should_save_glb=True,
+            should_save_glb=False,
             model=self.model,
             retrieval=self.retrieval_path, 
             device='cuda',
@@ -101,9 +101,9 @@ class MuSt3RWrapper:
         )
         
         # Generate PLY file with confidence threshold of 6.0
-        thresholds = [6.0, 5.0, 4.0, 3.0,  2.0, 1.5, min_conf_thr]
+        # thresholds = [6.0, 5.0, 4.0, 3.0,  2.0, 1.5, min_conf_thr]
+        thresholds = [5.0, 2.0, 1.5, min_conf_thr]
         for thr in thresholds:
-
             try:
                 logger.info(f"Generating PLY file with confidence threshold {thr}")
                 outfile = get_3D_model_from_scene(
@@ -120,9 +120,9 @@ class MuSt3RWrapper:
                 logger.error(f"Error generating PLY file with confidence threshold {thr}: {e}")
                 pass
         
-        # Save scene as pickle file
-        with open(os.path.join(output_dir, 'scene.pkl'), 'wb') as f:
-            pickle.dump(scene, f)
+        # # Save scene as pickle file
+        # with open(os.path.join(output_dir, 'scene.pkl'), 'wb') as f:
+        #     pickle.dump(scene, f)
         
         return scene
 
