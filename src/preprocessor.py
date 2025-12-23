@@ -160,7 +160,7 @@ class Preprocessor:
         cmd.extend([
             "-i", str(self.video_path),
             "-vf", f"fps={FPS}",  # Use fps filter for better performance than -r
-            "-an -sn -dn", # skip audio and other streams
+            # "-an -sn -dn", # skip audio and other streams
             # "-c:v", "mjpeg",  # Use MJPEG encoder for faster JPEG encoding
             "-q:v", str(JPEG_QUALITY),  # JPEG quality (1-31, lower = higher quality)
             # "-preset", "ultrafast",  # Fastest encoding preset
