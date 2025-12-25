@@ -8,3 +8,4 @@ __pycache__/
 **/__pycache__/
 sandbox/
 weights/
+**/.ruff_cache/
