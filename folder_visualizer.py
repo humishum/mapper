@@ -2,48 +2,33 @@ import os
 import re
 import glob
 import numpy as np
-import open3d as o3d
+from plyfile import PlyData
 import dash
 from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
 
 def parse_ply(filename, max_points=300000):
-    """Parse a PLY file using Open3D and return vertices (N,3) and colors (N,3) as numpy arrays."""
-    print(f"DEBUG: parse_ply called with filename: {filename}, max_points: {max_points}")
-    
+    """Parse a PLY file using plyfile and return vertices (N,3) and colors (N,3) as numpy arrays."""
     try:
-        # Read point cloud using Open3D
-        print("DEBUG: Loading point cloud with Open3D...")
-        pcd = o3d.io.read_point_cloud(filename)
-        print(f"DEBUG: Point cloud loaded, has {len(pcd.points)} points")
+        plydata = PlyData.read(filename)
+        vertex = plydata['vertex']
+        
+        # Get coordinates
+        xyz = np.vstack([vertex['x'], vertex['y'], vertex['z']]).T
+        
+        # Get colors if available (normalize to 0-1 range)
+        if 'red' in vertex.data.dtype.names:
+            rgb = np.vstack([vertex['red'], vertex['green'], vertex['blue']]).T.astype(np.float64) / 255.0
+        else:
+            rgb = np.ones_like(xyz)
         
         # Downsample if too many points
-        if len(pcd.points) > max_points:
-            print(f"DEBUG: Downsampling from {len(pcd.points)} to ~{max_points} points...")
-            # Use uniform downsampling - take every nth point
-            downsample_ratio = len(pcd.points) / max_points
-            indices = np.arange(0, len(pcd.points), int(downsample_ratio))[:max_points]
-            pcd = pcd.select_by_index(indices)
-            print(f"DEBUG: After downsampling: {len(pcd.points)} points")
+        if len(xyz) > max_points:
+            indices = np.linspace(0, len(xyz) - 1, max_points, dtype=int)
+            xyz = xyz[indices]
+            rgb = rgb[indices]
         
-        # Get vertices as numpy array
-        print("DEBUG: Converting points to numpy array...")
-        xyz = np.asarray(pcd.points)
-        print(f"DEBUG: Points shape: {xyz.shape}")
-        
-        # Get colors if available, otherwise use default white
-        print("DEBUG: Checking for colors...")
-        if pcd.has_colors():
-            print("DEBUG: Point cloud has colors, extracting...")
-            rgb = np.asarray(pcd.colors)
-            print(f"DEBUG: Colors shape: {rgb.shape}")
-        else:
-            print("DEBUG: No colors found, using default white...")
-            rgb = np.ones_like(xyz)
-            print(f"DEBUG: Default colors shape: {rgb.shape}")
-        
-        print("DEBUG: parse_ply completed successfully")
         return xyz, rgb
         
     except Exception as e:
@@ -104,7 +89,7 @@ def get_pointclouds(base_dir):
     return result
 
 # Set your base directory here
-BASE_DIR = "/home/ape/repos/mapper/data/output_102425/"
+BASE_DIR = "/home/ape/mapper_output/122225-must3r"
 
 pointclouds = get_pointclouds(BASE_DIR)
 
@@ -389,4 +374,5 @@ def toggle_plot_visibility(selected_plots, plot_ids):
     return styles
 
 if __name__ == "__main__":
+    print("Starting Dash app...")
     app.run(debug=True, host="0.0.0.0", port=8050)
