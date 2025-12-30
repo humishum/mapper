@@ -1,0 +1,21 @@
+# ORB-SLAM Model Configuration
+
+# ORB feature parameters
+num_features: 2000  # Max features per frame
+scale_factor: 1.2  # Scale factor between pyramid levels
+num_levels: 8  # Number of pyramid levels
+
+# Matching parameters
+match_ratio: 0.75  # Lowe's ratio test threshold
+min_matches: 50  # Minimum matches to estimate pose
+
+# Scale recovery
+use_imu: false  # Use IMU for scale (requires IMU data)
+
+# Camera intrinsics (optional - will estimate if not provided)
+# fx: 1000.0
+# fy: 1000.0
+# cx: 640.0
+# cy: 360.0
+
+# Note: ORB-SLAM does NOT output metric scale without IMU/GPS

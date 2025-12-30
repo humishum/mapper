@@ -13,8 +13,30 @@ from .cache import LRUCache
 logger = logging.getLogger(__name__)
 np.random.seed(42)
 
-# could be a dataclass? works for now
+
 class LocationInfo:
+    """
+    Information about a pointcloud location.
+
+    Supports two directory structures:
+
+    1. Legacy/Constructor format:
+       {location}/
+         metadata.json
+         images/
+         pointclouds/
+           sequence_1/
+             scene_thr5.0.ply
+           sequence_2/
+             ...
+
+    2. Experiment runner format:
+       {experiment}/outputs/{location}/
+         images/
+         scene_thr5.0.ply  (directly in folder)
+         aligned_pointcloud.ply
+    """
+
     def __init__(self, name: str, metadata: Dict, data_dir: Path):
         self.name = name
         self.lat = metadata.get("initial_gps_coordinates", [0, 0])[0]
@@ -24,13 +46,24 @@ class LocationInfo:
         self.video_name = metadata.get("video_name", "")
         self.data_dir = data_dir
 
-        # TODO: remove sequences once we get sub-global aligment/bundle adjustment working
-        pointcloud_dir = data_dir / "pointclouds"
+        # Detect directory structure and find sequences/pointclouds
         self.sequences = []
+        self.ply_files = []  # Direct PLY files (new format)
+
+        # Check for legacy structure: pointclouds/sequence_N/
+        pointcloud_dir = data_dir / "pointclouds"
         if pointcloud_dir.exists():
             for seq_dir in sorted(pointcloud_dir.iterdir()):
                 if seq_dir.is_dir() and seq_dir.name.startswith("sequence_"):
                     self.sequences.append(seq_dir.name)
+
+        # Check for new structure: PLY files directly in folder
+        for ply_file in sorted(data_dir.glob("*.ply")):
+            self.ply_files.append(ply_file.name)
+
+        # If no sequences found but we have direct PLY files, create a virtual "default" sequence
+        if not self.sequences and self.ply_files:
+            self.sequences = ["default"]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +74,7 @@ class LocationInfo:
             "frames": self.frames,
             "video_name": self.video_name,
             "sequences": self.sequences,
+            "ply_files": self.ply_files,  # Include direct PLY files
         }
 
 
@@ -53,6 +87,8 @@ class PointCloudDataService:
     def get_all_locations(self) -> List[LocationInfo]:
         """
         Scan data directory and return information about all locations.
+
+        Supports both direct location folders and experiment output folders.
         """
         locations = []
 
@@ -60,29 +96,69 @@ class PointCloudDataService:
             logger.error(f"Data directory does not exist: {self.data_dir}")
             return locations
 
-        for location_dir in sorted(self.data_dir.iterdir()):
+        # Check for experiment runner format: look in outputs/ subfolder
+        outputs_dir = self.data_dir / "outputs"
+        if outputs_dir.exists():
+            # This is an experiment output folder
+            locations.extend(self._scan_directory(outputs_dir))
+        else:
+            # This is a direct data folder
+            locations.extend(self._scan_directory(self.data_dir))
+
+        return locations
+
+    def _scan_directory(self, scan_dir: Path) -> List[LocationInfo]:
+        """Scan a directory for location folders."""
+        locations = []
+
+        for location_dir in sorted(scan_dir.iterdir()):
             if not location_dir.is_dir():
                 continue
 
-            metadata_file = location_dir / "metadata.json"
-            if not metadata_file.exists():
-                logger.warning(f"No metadata.json found in {location_dir}")
-                continue
+            # Look for metadata in the location folder or images subfolder
+            metadata = self._find_metadata(location_dir)
+            if metadata is None:
+                # No metadata found, skip unless we have PLY files
+                if not list(location_dir.glob("*.ply")):
+                    logger.warning(f"No metadata.json or PLY files in {location_dir}")
+                    continue
+                # Create minimal metadata for PLY-only folders
+                metadata = {"initial_gps_coordinates": [0, 0], "altitude": 0}
 
             try:
-                with open(metadata_file, "r") as f:
-                    metadata = json.load(f)
-
                 location_info = LocationInfo(location_dir.name, metadata, location_dir)
                 locations.append(location_info)
                 logger.info(
                     f"Found location: {location_info.name} at ({location_info.lat}, {location_info.lon})"
                 )
             except Exception as e:
-                logger.error(f"Error reading metadata from {metadata_file}: {e}")
+                logger.error(f"Error creating LocationInfo from {location_dir}: {e}")
                 continue
 
         return locations
+
+    def _find_metadata(self, location_dir: Path) -> Optional[Dict]:
+        """Find and load metadata from various possible locations."""
+        # Check direct metadata.json
+        metadata_file = location_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file, "r") as f:
+                return json.load(f)
+
+        # Check in images subfolder (experiment runner caches metadata there)
+        images_metadata = location_dir / "images" / ".cache_info.json"
+        if images_metadata.exists():
+            # This is cache info, not full metadata - try to supplement
+            with open(images_metadata, "r") as f:
+                cache_info = json.load(f)
+            return {
+                "video_name": cache_info.get("video_name", ""),
+                "frames": cache_info.get("frame_count", 0),
+                "initial_gps_coordinates": [0, 0],
+                "altitude": 0,
+            }
+
+        return None
 
     def load_pointcloud(
         self,
@@ -97,7 +173,7 @@ class PointCloudDataService:
 
         Args:
             location: Name of the location directory
-            sequence: Sequence name (e.g., "sequence_1")
+            sequence: Sequence name (e.g., "sequence_1") or "default" for direct PLY files
             threshold: Threshold value for PLY file selection (e.g., 2.0)
             max_points: Maximum number of points to return
             use_gps_coords: If True, convert to GPS coordinates; if False, keep local coords
@@ -114,26 +190,22 @@ class PointCloudDataService:
             positions, colors = cached_data
             return self._format_response(positions, colors, location)
 
-        # Find PLY file
+        # Find location directory (check both direct and outputs/ paths)
         location_dir = self.data_dir / location
         if not location_dir.exists():
-            logger.error(f"Location directory not found: {location_dir}")
+            location_dir = self.data_dir / "outputs" / location
+        if not location_dir.exists():
+            logger.error(f"Location directory not found: {location}")
             return None
 
-        ply_file = location_dir / "pointclouds" / sequence / f"scene_thr{threshold}.ply"
-        if not ply_file.exists():
-            logger.error(f"PLY file not found: {ply_file}")
+        # Find PLY file based on structure
+        ply_file = self._find_ply_file(location_dir, sequence, threshold)
+        if ply_file is None or not ply_file.exists():
+            logger.error(f"PLY file not found for {location}/{sequence}/thr{threshold}")
             return None
 
         # Load metadata for GPS coordinates
-        metadata_file = location_dir / "metadata.json"
-        if not metadata_file.exists():
-            logger.error(f"Metadata file not found: {metadata_file}")
-            return None
-
-        with open(metadata_file, "r") as f:
-            metadata = json.load(f)
-
+        metadata = self._find_metadata(location_dir) or {}
         origin_lat = metadata.get("initial_gps_coordinates", [0, 0])[0]
         origin_lon = metadata.get("initial_gps_coordinates", [0, 0])[1]
         origin_alt = metadata.get("altitude", 0)
@@ -160,6 +232,39 @@ class PointCloudDataService:
         )
 
         return self._format_response(positions, colors, location)
+
+    def _find_ply_file(
+        self, location_dir: Path, sequence: str, threshold: float
+    ) -> Optional[Path]:
+        """
+        Find PLY file supporting both directory structures.
+
+        1. Legacy: pointclouds/sequence_N/scene_thrX.X.ply
+        2. New: scene_thrX.X.ply or aligned_pointcloud.ply directly in folder
+        """
+        # Try legacy structure first
+        legacy_path = location_dir / "pointclouds" / sequence / f"scene_thr{threshold}.ply"
+        if legacy_path.exists():
+            return legacy_path
+
+        # Try new structure - direct PLY in folder
+        if sequence == "default" or sequence == "sequence_1":
+            # Try threshold-specific file
+            direct_path = location_dir / f"scene_thr{threshold}.ply"
+            if direct_path.exists():
+                return direct_path
+
+            # Try aligned pointcloud (from experiment runner)
+            aligned_path = location_dir / "aligned_pointcloud.ply"
+            if aligned_path.exists():
+                return aligned_path
+
+            # Try any threshold file
+            for thr_file in location_dir.glob("scene_thr*.ply"):
+                logger.info(f"Using available threshold file: {thr_file.name}")
+                return thr_file
+
+        return None
 
     def _load_ply_file(
         self, ply_file: Path, max_points: int
@@ -199,7 +304,7 @@ class PointCloudDataService:
                 logger.info(
                     f"Downsampling from {len(positions)} to {max_points} points using random sampling"
                 )
-                
+
                 indices = np.random.choice(len(positions), max_points, replace=False)
                 # Sort indices to maintain some spatial coherence
                 indices = np.sort(indices)
