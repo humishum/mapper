@@ -342,6 +342,7 @@ class VideoInput:
 
     Contains the path to extracted frames and optional telemetry data.
     """
+    video_path: Path  # Path to the original video file
     image_dir: Path  # Directory containing extracted frames
     fps: float  # Frame extraction rate
     frame_count: int  # Number of extracted frames

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class MASt3RModel(BaseModel):
     """
-    MASt3R: Multi-view Stereo 3D Reconstruction.
+    Must3r: Multi-view Stereo 3D Reconstruction.
 
     MASt3R produces high-quality dense point clouds from image sequences.
     It does NOT output metric scale - the scale is arbitrary and needs

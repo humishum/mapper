@@ -13,6 +13,7 @@ from ..preprocessing import VideoProcessor, TelemetryExtractor
 from ..alignment import GPSAligner
 from ..core.types import VideoInput
 from .metrics import MetricsCalculator
+from .utils import get_git_info
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,9 @@ class ExperimentRunner:
         exp_dir = self.config.output_folder / f"{self.config.name}_{timestamp}"
         exp_dir.mkdir(parents=True, exist_ok=True)
 
+        # Get git info
+        git_commit, git_status = get_git_info()
+
         # Save config copy
         config_dict = {
             "name": self.config.name,
@@ -193,6 +197,8 @@ class ExperimentRunner:
             "fps": self.config.fps,
             "align_to_gps": self.config.align_to_gps,
             "timestamp": timestamp,
+            "git_commit": git_commit,
+            "git_status": git_status,
         }
 
         with open(exp_dir / "config.yaml", "w") as f:
@@ -206,7 +212,7 @@ class ExperimentRunner:
         output_dir = exp_dir / "outputs" / video_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Extract frames (with caching)
+        # Step 1: Extract frames
         logger.info("  Extracting frames...")
         image_dir = self.video_processor.process(
             video_path,
@@ -232,6 +238,7 @@ class ExperimentRunner:
 
         # Step 3: Create video input
         video_input = VideoInput(
+            video_path=video_path,
             image_dir=image_dir,
             fps=self.config.fps,
             frame_count=frame_count,
