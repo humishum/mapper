@@ -1,1 +1,0 @@
-# Pipeline package for hiking 3D reconstruction
