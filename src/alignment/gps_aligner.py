@@ -8,6 +8,10 @@ from ..core.types import PointCloud, CameraPoses, GPSTrack, IMUData
 
 logger = logging.getLogger(__name__)
 
+# Alignment guardrails for low-information GPS tracks.
+MIN_GPS_TRAJECTORY_LENGTH_M = 2.0
+MIN_GPS_STD_DEV_M = 0.5
+
 
 class GPSAligner:
     """
@@ -60,11 +64,37 @@ class GPSAligner:
 
         # Step 1: Scale recovery
         scale = self.compute_scale(poses, gps_track)
+        if not np.isfinite(scale):
+            logger.warning("Non-finite scale factor, skipping GPS alignment")
+            return pointcloud
         logger.info(f"Computed scale factor: {scale:.4f}")
 
         # Step 2: Get positions in local ENU coordinates
         pose_positions = poses.get_positions()
         gps_enu = gps_track.to_local_enu()
+        if not np.isfinite(pose_positions).all() or not np.isfinite(gps_enu).all():
+            logger.warning("Non-finite pose or GPS positions, skipping GPS alignment")
+            return pointcloud
+        if not np.isfinite(pointcloud.points).all():
+            logger.warning("Non-finite pointcloud points detected, skipping GPS alignment")
+            return pointcloud
+        gps_traj_len = gps_track.get_trajectory_length_meters()
+        gps_std = float(np.mean(np.std(gps_enu, axis=0)))
+        if gps_traj_len < MIN_GPS_TRAJECTORY_LENGTH_M or gps_std < MIN_GPS_STD_DEV_M:
+            logger.warning(
+                "GPS track lacks motion (length=%.3f m, std=%.3f m), skipping GPS alignment",
+                gps_traj_len,
+                gps_std,
+            )
+            return pointcloud
+        
+        logger.debug(
+            "GPS align stats: pose min %s max %s | gps min %s max %s",
+            np.min(pose_positions, axis=0),
+            np.max(pose_positions, axis=0),
+            np.min(gps_enu, axis=0),
+            np.max(gps_enu, axis=0),
+        )
 
         # Step 3: Subsample to match counts
         pose_positions, gps_enu = self._align_sample_counts(
@@ -76,6 +106,9 @@ class GPSAligner:
 
         # Step 5: Compute rotation and translation (Kabsch algorithm)
         rotation, translation = self._kabsch_align(scaled_poses, gps_enu)
+        if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
+            logger.warning("Non-finite alignment transform, skipping GPS alignment")
+            return pointcloud
 
         # Step 6: Optionally refine rotation using gravity
         if imu_data is not None:
@@ -89,6 +122,13 @@ class GPSAligner:
         # Step 8: Apply to point cloud (including scale)
         scaled_points = pointcloud.points * scale
         aligned_points = (rotation @ scaled_points.T).T + translation
+        aligned_finite = np.isfinite(aligned_points).all(axis=1)
+        if not np.all(aligned_finite):
+            logger.warning(
+                "Aligned pointcloud has %d non-finite points, skipping GPS alignment",
+                int(np.count_nonzero(~aligned_finite)),
+            )
+            return pointcloud
 
         # Get origin GPS
         origin_gps = (
@@ -133,6 +173,10 @@ class GPSAligner:
 
         if gps_length < 1e-6:
             logger.warning("GPS trajectory length near zero, using scale=1.0")
+            return 1.0
+
+        if not np.isfinite(pose_length) or not np.isfinite(gps_length):
+            logger.warning("Non-finite trajectory length, using scale=1.0")
             return 1.0
 
         scale = gps_length / pose_length
@@ -202,6 +246,8 @@ class GPSAligner:
 
         # SVD
         U, S, Vt = np.linalg.svd(H)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Kabsch singular values: %s", S)
 
         # Compute rotation
         R = Vt.T @ U.T

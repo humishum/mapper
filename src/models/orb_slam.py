@@ -129,6 +129,8 @@ class ORBSLAMModel(BaseModel):
 
         # Initialize camera matrix
         first_image = cv2.imread(str(image_paths[0]), cv2.IMREAD_GRAYSCALE)
+        if first_image is None:
+            raise ValueError(f"Could not read first frame: {image_paths[0]}")
         K = self._get_camera_matrix(first_image.shape)
 
         # Process frames
@@ -145,6 +147,10 @@ class ORBSLAMModel(BaseModel):
 
             # Load current frame
             curr_image = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+            if curr_image is None:
+                logger.warning(f"  Frame {i}: Could not read image, skipping")
+                poses.append(poses[-1].copy())
+                continue
             curr_kp, curr_desc = self.orb.detectAndCompute(curr_image, None)
 
             if curr_desc is None or len(curr_kp) < self.min_matches:
@@ -185,6 +191,22 @@ class ORBSLAMModel(BaseModel):
 
             # Recover pose
             _, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
+            if not np.isfinite(R).all() or not np.isfinite(t).all():
+                logger.warning(f"  Frame {i}: Non-finite pose recovered, skipping")
+                poses.append(poses[-1].copy())
+                prev_image = curr_image
+                prev_kp, prev_desc = curr_kp, curr_desc
+                continue
+
+            inlier_count = int(np.count_nonzero(mask))
+            logger.debug(
+                "  Frame %d: keypoints=%d/%d matches=%d inliers=%d",
+                i,
+                len(prev_kp),
+                len(curr_kp),
+                len(matches),
+                inlier_count,
+            )
 
             # Build transformation matrix
             T = np.eye(4)
@@ -200,7 +222,7 @@ class ORBSLAMModel(BaseModel):
             inlier_pts2 = pts2[mask.ravel() == 255]
 
             if len(inlier_pts1) >= 8:
-                points_3d = self._triangulate_points(
+                points_3d, valid_indices = self._triangulate_points(
                     inlier_pts1, inlier_pts2,
                     poses[-2], current_pose, K
                 )
@@ -211,7 +233,7 @@ class ORBSLAMModel(BaseModel):
                     # Get colors from image
                     color_image = cv2.imread(str(img_path))
                     colors = self._get_point_colors(
-                        inlier_pts2[:len(points_3d)], color_image
+                        inlier_pts2[valid_indices], color_image
                     )
                     all_colors.extend(colors)
 
@@ -224,9 +246,22 @@ class ORBSLAMModel(BaseModel):
         if len(all_points) > 0:
             points_array = np.array(all_points, dtype=np.float32)
             colors_array = np.array(all_colors, dtype=np.uint8) if all_colors else None
+            finite_mask = np.isfinite(points_array).all(axis=1)
+            non_finite = int(np.count_nonzero(~finite_mask))
+            if non_finite:
+                logger.warning(
+                    "ORB-SLAM: Dropping %d non-finite points before saving",
+                    non_finite,
+                )
+                points_array = points_array[finite_mask]
+                if colors_array is not None:
+                    colors_array = colors_array[finite_mask]
         else:
             points_array = np.zeros((0, 3), dtype=np.float32)
             colors_array = None
+
+        if not np.isfinite(poses_array).all():
+            logger.warning("ORB-SLAM: Non-finite pose values detected")
 
         logger.info(f"ORB-SLAM: Generated {len(points_array)} points, {len(poses_array)} poses")
 
@@ -311,7 +346,7 @@ class ORBSLAMModel(BaseModel):
         pose1: np.ndarray,
         pose2: np.ndarray,
         K: np.ndarray,
-    ) -> List[np.ndarray]:
+    ) -> Tuple[List[np.ndarray], np.ndarray]:
         """Triangulate 3D points from matched 2D points."""
         # Build projection matrices
         P1 = K @ pose1[:3, :]
@@ -324,11 +359,27 @@ class ORBSLAMModel(BaseModel):
         )
 
         # Convert to 3D
-        points_3d = points_4d[:3, :] / points_4d[3:, :]
-        points_3d = points_3d.T
+        w = points_4d[3, :]
+        valid_w = np.abs(w) > 1e-8
+        if not np.all(valid_w):
+            logger.debug(
+                "Triangulation: Dropped %d points with near-zero w",
+                int(np.count_nonzero(~valid_w)),
+            )
+        points_3d = (points_4d[:3, valid_w] / w[valid_w]).T
+        valid_indices = np.flatnonzero(valid_w)
+        finite_mask = np.isfinite(points_3d).all(axis=1)
+        if not np.all(finite_mask):
+            logger.debug(
+                "Triangulation: Dropped %d non-finite points",
+                int(np.count_nonzero(~finite_mask)),
+            )
+        points_3d = points_3d[finite_mask]
+        valid_indices = valid_indices[finite_mask]
 
         # Filter points behind camera or too far
         valid = []
+        kept_indices = []
         for i, pt in enumerate(points_3d):
             # Check if in front of both cameras
             pt_cam1 = pose1[:3, :3] @ pt + pose1[:3, 3]
@@ -339,8 +390,9 @@ class ORBSLAMModel(BaseModel):
                 dist = np.linalg.norm(pt)
                 if 0.1 < dist < 1000:
                     valid.append(pt)
+                    kept_indices.append(valid_indices[i])
 
-        return valid
+        return valid, np.array(kept_indices, dtype=int)
 
     def _get_point_colors(
         self,

@@ -26,6 +26,7 @@ output_folder: "/home/ape/mapper_output/experiments"
 fps: 10  # Frame extraction rate
 align_to_gps: true  # Align output to GPS coordinates
 force_reprocess: false  # Re-extract frames even if cached
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
 
 # Video filtering
 video_extensions:

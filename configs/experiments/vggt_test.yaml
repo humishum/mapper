@@ -1,0 +1,28 @@
+# VGGT Experiment Configuration
+#
+# Run with:
+#   python -m src.experiments.runner --config configs/experiments/vggt_test.yaml
+
+name: "vggt_trail_test"
+
+model: "vggt"
+
+model_config:
+  model_name: "facebook/VGGT-1B"
+  weights_path: null  # Optional: local model.pt if you downloaded manually
+  max_frames: 3
+  device: "cuda"
+  image_size: 518
+  preprocess_mode: "square"  # square | pad | crop
+  use_point_map: false
+  min_confidence: 5.0
+  max_points: 50000
+  sample_seed: 0
+
+input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
+output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+
+fps: 10
+align_to_gps: true
+force_reprocess: false
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)

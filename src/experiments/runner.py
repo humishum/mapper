@@ -34,6 +34,7 @@ class ExperimentConfig:
     fps: float = 10.0
     align_to_gps: bool = True
     force_reprocess: bool = False
+    frame_cache_dir: Optional[Path] = None
 
     # Video filtering (optional)
     video_extensions: List[str] = field(
@@ -43,6 +44,8 @@ class ExperimentConfig:
     def __post_init__(self):
         self.input_folder = Path(self.input_folder)
         self.output_folder = Path(self.output_folder)
+        if self.frame_cache_dir is not None:
+            self.frame_cache_dir = Path(self.frame_cache_dir)
 
 
 class ExperimentRunner:
@@ -101,6 +104,7 @@ class ExperimentRunner:
             fps=raw.get("fps", 10.0),
             align_to_gps=raw.get("align_to_gps", True),
             force_reprocess=raw.get("force_reprocess", False),
+            frame_cache_dir=raw.get("frame_cache_dir"),
             video_extensions=raw.get(
                 "video_extensions", [".MP4", ".MOV", ".mp4", ".mov"]
             ),
@@ -196,6 +200,12 @@ class ExperimentRunner:
             "output_folder": str(self.config.output_folder),
             "fps": self.config.fps,
             "align_to_gps": self.config.align_to_gps,
+            "force_reprocess": self.config.force_reprocess,
+            "frame_cache_dir": (
+                str(self.config.frame_cache_dir)
+                if self.config.frame_cache_dir is not None
+                else None
+            ),
             "timestamp": timestamp,
             "git_commit": git_commit,
             "git_status": git_status,
@@ -214,9 +224,12 @@ class ExperimentRunner:
 
         # Step 1: Extract frames
         logger.info("  Extracting frames...")
+        frame_cache_root = self._get_frame_cache_root()
+        frame_cache_root.mkdir(parents=True, exist_ok=True)
+        frame_output_dir = frame_cache_root / video_name
         image_dir = self.video_processor.process(
             video_path,
-            output_dir,
+            frame_output_dir,
             force=self.config.force_reprocess,
         )
         frame_count = self.video_processor.get_frame_count(image_dir)
@@ -309,6 +322,12 @@ class ExperimentRunner:
             "metrics": metrics,
             "model_metadata": result.metadata,
         }
+
+    def _get_frame_cache_root(self) -> Path:
+        """Resolve the root directory used for cached frame extraction."""
+        if self.config.frame_cache_dir is not None:
+            return self.config.frame_cache_dir
+        return self.config.output_folder / "_frame_cache"
 
     def _save_results(self, exp_dir: Path, results: List[dict]) -> None:
         """Save experiment results to JSON."""

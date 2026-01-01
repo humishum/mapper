@@ -31,3 +31,4 @@ output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
 fps: 10
 align_to_gps: true
 force_reprocess: false
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
