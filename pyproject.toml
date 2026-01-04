@@ -43,4 +43,11 @@ dependencies = [
     "dash-bootstrap-components>=2.0.4",
     "pyexiftool>=0.5.6",
     "plyfile>=1.0.0",
+    "gopropy",
+    "python-dotenv>=1.2.1",
+    "pytest>=9.0.2",
+    "GitPython>=3.1.0",
 ]
+
+[tool.uv.sources]
+gopropy = { path = "../gopro-py", editable = true }

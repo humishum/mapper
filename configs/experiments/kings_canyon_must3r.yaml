@@ -1,0 +1,34 @@
+# Kings Canyon MASt3R Experiment
+#
+# Run with:
+#   python -m src.experiments.runner --config configs/experiments/kings_canyon_must3r.yaml
+
+name: "kings_canyon_must3r"
+
+model: "must3r"
+
+model_config:
+  weights_path: "/home/ape/repos/mapper/weights/MUSt3R_512_cvpr.pth"
+  retrieval_path: "/home/ape/repos/mapper/weights/MUSt3R_512_retrieval_trainingfree.pth"
+  image_size: 512
+
+  # VRAM limit: max 50 frames per video (increase for larger GPUs)
+  max_frames: 50
+
+  # Confidence thresholds for PLY output
+  confidence_thresholds:
+    - 5.0
+    - 2.0
+    - 1.5
+
+  # Memory settings
+  num_mem_imgs: 30  # Reduced for low VRAM
+  subsample: 2
+
+input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
+output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+
+fps: 10
+align_to_gps: true
+force_reprocess: false
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)

@@ -1,0 +1,12 @@
+# DA3-Streaming Model Configuration
+
+# Path to DA3 installation
+da3_path: null  # Set to path like: /path/to/Depth-Anything-3
+
+# Output options
+save_per_frame_depth: false  # Save individual depth maps
+
+device: cuda
+
+# Note: DA3-Streaming is designed for video with temporal consistency
+# It outputs metric-scale depth and fused point clouds

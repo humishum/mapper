@@ -1,0 +1,40 @@
+# Kings Canyon ORB-SLAM Experiment
+#
+# Run with:
+#   python -m src.experiments.runner --config configs/experiments/kings_canyon_orb_slam.yaml
+#
+# ORB-SLAM is a visual odometry system that generates sparse point clouds
+# and camera trajectories. It does NOT output metric scale without IMU or GPS.
+# GPS alignment is recommended to recover metric scale.
+
+name: "kings_canyon_orb_slam"
+
+model: "orb_slam"
+
+model_config:
+  # ORB feature extraction parameters
+  num_features: 2000      # Number of ORB features to extract per frame
+  scale_factor: 1.2       # Scale factor between pyramid levels
+  num_levels: 8           # Number of pyramid levels
+
+  # Feature matching parameters
+  match_ratio: 0.75       # Ratio test threshold for feature matching
+  min_matches: 50         # Minimum matches required between frames
+
+  # IMU integration (if available in telemetry)
+  use_imu: true           # Use IMU data for scale recovery
+
+  # Camera intrinsics (None = auto-estimate from image size)
+  # Uncomment and set if you know your camera calibration:
+  # fx: 1234.5
+  # fy: 1234.5
+  # cx: 960.0
+  # cy: 540.0
+
+input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
+output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+
+fps: 10
+align_to_gps: true        # Recommended: ORB-SLAM needs GPS for metric scale
+force_reprocess: false
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)

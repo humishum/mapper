@@ -1,5 +1,6 @@
 /**
  * MapView component - Main deck.gl map with markers and pointclouds
+ * Using deck.gl 8.x (WebGL only, no WebGPU)
  */
 import React from 'react';
 import DeckGL from '@deck.gl/react';

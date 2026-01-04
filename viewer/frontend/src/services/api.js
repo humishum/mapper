@@ -3,7 +3,78 @@
  */
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Auto-detect API URL based on current hostname
+// When accessed via port forwarding, use the same hostname but backend port
+// Or use relative URLs if Vite proxy is configured
+function getApiBaseUrl() {
+  // Check for explicit environment variable first
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  // In development with Vite proxy, use relative URLs (proxy handles forwarding)
+  if (import.meta.env.DEV) {
+    return ''; // Relative URL - Vite proxy will forward to backend
+  }
+  
+  // Auto-detect: use same hostname as current page, but backend port (8000)
+  const currentHost = window.location.hostname;
+  const currentProtocol = window.location.protocol;
+  
+  // If accessing via IP address (port forwarding), use that IP for backend
+  if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+    return `${currentProtocol}//${currentHost}:8000`;
+  }
+  
+  // Default to localhost for local development
+  return 'http://localhost:8000';
+}
+
+const API_BASE_URL = getApiBaseUrl();
+console.log('[API] Using API base URL:', API_BASE_URL || '(relative - using Vite proxy)');
+
+// Configure axios with timeout and interceptors for debugging
+axios.defaults.timeout = 30000; // 30 second timeout
+
+// Request interceptor
+axios.interceptors.request.use(
+  (config) => {
+    console.log('[API] Request:', {
+      method: config.method,
+      url: config.url,
+      baseURL: config.baseURL,
+      fullURL: `${config.baseURL || ''}${config.url}`
+    });
+    return config;
+  },
+  (error) => {
+    console.error('[API] Request error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor
+axios.interceptors.response.use(
+  (response) => {
+    console.log('[API] Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: response.config.url,
+      hasData: !!response.data
+    });
+    return response;
+  },
+  (error) => {
+    console.error('[API] Response error:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      url: error.config?.url
+    });
+    return Promise.reject(error);
+  }
+);
 
 /**
  * Fetch all available locations with GPS coordinates.
@@ -13,10 +84,21 @@ export async function fetchLocations() {
   try {
     console.log('[API] Fetching locations from:', `${API_BASE_URL}/api/locations`);
     const response = await axios.get(`${API_BASE_URL}/api/locations`);
-    console.log('[API] Received locations:', response.data.count);
+    console.log('[API] Response status:', response.status);
+    console.log('[API] Response headers:', response.headers);
+    console.log('[API] Response data:', response.data);
+    console.log('[API] Response data type:', typeof response.data);
+    console.log('[API] Received locations count:', response.data?.count);
+    console.log('[API] Received locations array:', response.data?.locations);
     return response.data.locations;
   } catch (error) {
     console.error('[API] Error fetching locations:', error);
+    console.error('[API] Error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      headers: error.response?.headers
+    });
     throw error;
   }
 }

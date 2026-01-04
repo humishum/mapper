@@ -1,0 +1,36 @@
+# Example Experiment Configuration
+#
+# Run with:
+#   python -m src.experiments.runner --config configs/experiments/example_experiment.yaml
+
+name: "trail_reconstruction_test"
+
+# Model to use (must3r, vggt, da3_streaming, orb_slam)
+model: "must3r"
+
+# Model-specific configuration
+model_config:
+  weights_path: "/path/to/must3r/weights.pth"
+  retrieval_path: "/path/to/retrieval/data"
+  image_size: 512
+  window_size: 500
+  confidence_thresholds:
+    - 5.0
+    - 2.0
+
+# Input/Output folders
+input_folder: "/home/ape/gopro_videos/tahoe_trails"
+output_folder: "/home/ape/mapper_output/experiments"
+
+# Processing options
+fps: 10  # Frame extraction rate
+align_to_gps: true  # Align output to GPS coordinates
+force_reprocess: false  # Re-extract frames even if cached
+frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+# Video filtering
+video_extensions:
+  - ".MP4"
+  - ".MOV"
+  - ".mp4"
+  - ".mov"

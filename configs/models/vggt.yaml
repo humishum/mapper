@@ -1,0 +1,11 @@
+# VGGT Model Configuration
+
+# Model name (auto-downloads from HuggingFace)
+model_name: facebook/vggt-1b
+
+# Processing parameters
+max_frames: 100  # Maximum frames to process
+device: cuda
+
+# Note: VGGT outputs metric-scale reconstructions
+# Camera intrinsics are estimated by the model

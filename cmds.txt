@@ -1,2 +1,7 @@
 # Must3r command
 uv run src/process_folder.py --folder <> --output_folder <> --weights_path /workspace/repos/mapper/weights/MUSt3R_512_cvpr.pth --retrieval_path /workspace/repos/mapper/weights/MUSt3R_512_retrieval_trainingfree.pth --image_size 512
+
+# runner 
+uv run python -m src.experiments.runner --config configs/experiments/kings_canyon_must3r.yaml
+
+uv run python -m src.experiments.runner --config configs/experiments/kings_canyon_orb_slam.yaml
