@@ -1,4 +1,4 @@
-"""Experiment runner for testing reconstruction models."""
+"""Experiment runner for testing reconstruction models/workflows."""
 
 from pathlib import Path
 from dataclasses import dataclass, field
