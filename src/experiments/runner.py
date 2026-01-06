@@ -7,6 +7,7 @@ from typing import Optional, List
 import json
 import yaml
 import logging
+import sys
 
 from ..models import get_model
 from ..preprocessing import VideoProcessor, TelemetryExtractor
@@ -15,8 +16,9 @@ from ..core.types import VideoInput
 from .metrics import MetricsCalculator
 from .utils import get_git_info
 
-logger = logging.getLogger(__name__)
 
+DEFAULT_FRAME_RATE = 10 
+DEFAULT_VIDEO_EXTENSIONS = [".MP4", ".MOV", ".mp4", ".mov"]
 
 @dataclass
 class ExperimentConfig:
@@ -31,15 +33,13 @@ class ExperimentConfig:
     model_config: dict = field(default_factory=dict)
 
     # Processing options
-    fps: float = 10.0
+    fps: float = DEFAULT_FRAME_RATE
     align_to_gps: bool = True
     force_reprocess: bool = False
     frame_cache_dir: Optional[Path] = None
 
     # Video filtering (optional)
-    video_extensions: List[str] = field(
-        default_factory=lambda: [".MP4", ".MOV", ".mp4", ".mov"]
-    )
+    video_extensions: List[str] = field(default_factory=lambda: DEFAULT_VIDEO_EXTENSIONS)
 
     def __post_init__(self):
         self.input_folder = Path(self.input_folder)
@@ -72,14 +72,27 @@ class ExperimentRunner:
         """
         self.config = config
 
-        # Initialize components
         self.video_processor = VideoProcessor(fps=config.fps)
         self.telemetry_extractor = TelemetryExtractor()
         self.gps_aligner = GPSAligner()
         self.metrics_calculator = MetricsCalculator()
 
-        # Model will be loaded lazily
+        # lazy load model 
         self._model = None
+
+        # can probably clean this up later and integrate better with sub loggers 
+        # logger.propogate = False
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+        file_handler = logging.FileHandler(self.config.output_folder / "experiment.log", mode='a')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(stream_handler)
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "ExperimentRunner":
@@ -101,13 +114,11 @@ class ExperimentRunner:
             input_folder=raw["input_folder"],
             output_folder=raw["output_folder"],
             model_config=raw.get("model_config", {}),
-            fps=raw.get("fps", 10.0),
+            fps=raw.get("fps", DEFAULT_FRAME_RATE),
             align_to_gps=raw.get("align_to_gps", True),
             force_reprocess=raw.get("force_reprocess", False),
             frame_cache_dir=raw.get("frame_cache_dir"),
-            video_extensions=raw.get(
-                "video_extensions", [".MP4", ".MOV", ".mp4", ".mov"]
-            ),
+            video_extensions=raw.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
         )
 
         return cls(config)
@@ -119,33 +130,33 @@ class ExperimentRunner:
         Returns:
             List of results for each video processed
         """
-        logger.info(f"Starting experiment: {self.config.name}")
-        logger.info(f"Model: {self.config.model}")
-        logger.info(f"Input folder: {self.config.input_folder}")
+        self.logger.info(f"Starting experiment: {self.config.name}")
+        self.logger.info(f"Model: {self.config.model}")
+        self.logger.info(f"Input folder: {self.config.input_folder}")
 
         # Setup experiment directory
         exp_dir = self._setup_experiment_dir()
 
-        # Load model
-        self._load_model()
-
         # Find videos
         videos = self._find_videos()
-        logger.info(f"Found {len(videos)} videos to process")
+        self.logger.info(f"Found {len(videos)} videos to process")
 
         if len(videos) == 0:
             logger.warning("No videos found!")
             return []
 
+        # Load model
+        self._load_model()
+
         results = []
 
         for i, video_path in enumerate(videos, 1):
-            logger.info(f"[{i}/{len(videos)}] Processing: {video_path.name}")
+            self.logger.info(f"[{i}/{len(videos)}] Processing: {video_path.name}")
 
             try:
                 result = self._process_video(video_path, exp_dir)
                 results.append(result)
-                logger.info(f"  Success: {result.get('point_count', 0)} points")
+                self.logger.info(f"  Success: {result.get('point_count', 0)} points")
             except Exception as e:
                 logger.error(f"  Error: {e}")
                 results.append({
@@ -160,18 +171,18 @@ class ExperimentRunner:
         # Print summary
         self._print_summary(results)
 
-        logger.info(f"Experiment complete. Results in: {exp_dir}")
+        self.logger.info(f"Experiment complete. Results in: {exp_dir}")
         return results
 
     def _load_model(self) -> None:
         """Load the reconstruction model."""
-        logger.info(f"Loading model: {self.config.model}")
+        self.logger.info(f"Loading model: {self.config.model}")
 
         model_cls = get_model(self.config.model)
         self._model = model_cls(self.config.model_config)
         self._model.load()
 
-        logger.info(f"Model loaded. Capabilities: {self._model.get_capabilities()}")
+        self.logger.info(f"Model loaded. Capabilities: {self._model.get_capabilities()}")
 
     def _find_videos(self) -> List[Path]:
         """Find all video files in input folder."""
@@ -222,8 +233,8 @@ class ExperimentRunner:
         output_dir = exp_dir / "outputs" / video_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Extract frames
-        logger.info("  Extracting frames...")
+        # Extract frames with ffmpeg, skip if already cached in output folder
+        self.logger.info("  Extracting frames...")
         frame_cache_root = self._get_frame_cache_root()
         frame_cache_root.mkdir(parents=True, exist_ok=True)
         frame_output_dir = frame_cache_root / video_name
@@ -233,23 +244,29 @@ class ExperimentRunner:
             force=self.config.force_reprocess,
         )
         frame_count = self.video_processor.get_frame_count(image_dir)
-        logger.info(f"  {frame_count} frames")
+        self.logger.info(f"  {frame_count} frames")
 
-        # Step 2: Extract telemetry
-        logger.info("  Extracting telemetry...")
-        gps_track, imu_data = self.telemetry_extractor.extract(video_path)
-
-        if gps_track is not None:
-            logger.info(f"  GPS: {len(gps_track)} points")
+        # Extract initial GPS first (GoPro telemetry or EXIF fallback).
+        self.logger.info("  Extracting initial GPS...")
+        initial_gps = self.telemetry_extractor.extract_initial_gps(video_path)
+        if initial_gps is not None:
+            self.logger.info(
+                "  Initial GPS: %.6f, %.6f, %.1f",
+                initial_gps[0],
+                initial_gps[1],
+                initial_gps[2],
+            )
         else:
-            logger.info("  GPS: not available")
+            self.logger.info("  Initial GPS: not available")
 
-        if imu_data is not None:
-            logger.info(f"  IMU: {len(imu_data)} samples")
-        else:
-            logger.info("  IMU: not available")
+        # Extract telemetry from video, only works for gopro videos.
+        self.logger.info("  Extracting telemetry...")
+        gps_track, imu_data = self.telemetry_extractor.extract_gps_imu(video_path)
 
-        # Step 3: Create video input
+        self.logger.info(f"  GPS: {len(gps_track)} points" if gps_track is not None else "  GPS: not available")
+        self.logger.info(f"  IMU: {len(imu_data)} samples" if imu_data is not None else "  IMU: not available")
+
+        #Create video input
         video_input = VideoInput(
             video_path=video_path,
             image_dir=image_dir,
@@ -260,11 +277,12 @@ class ExperimentRunner:
             metadata={
                 "video_path": str(video_path),
                 "video_name": video_name,
+                "initial_gps": initial_gps,
             },
         )
 
         # Step 4: Run reconstruction
-        logger.info("  Running reconstruction...")
+        self.logger.info("  Running reconstruction...")
         result = self._model.reconstruct(video_input, output_dir)
 
         # Step 5: Align to GPS (if enabled and data available)
@@ -273,7 +291,7 @@ class ExperimentRunner:
             and gps_track is not None
             and result.poses is not None
         ):
-            logger.info("  Aligning to GPS...")
+            self.logger.info("  Aligning to GPS...")
             result.pointcloud = self.gps_aligner.align(
                 result.pointcloud,
                 result.poses,
@@ -282,7 +300,7 @@ class ExperimentRunner:
             )
 
         # Step 6: Compute metrics
-        logger.info("  Computing metrics...")
+        self.logger.info("  Computing metrics...")
         metrics = self.metrics_calculator.compute_all(
             result.pointcloud,
             result.poses,
@@ -292,16 +310,21 @@ class ExperimentRunner:
         # Step 7: Save aligned point cloud
         aligned_ply_path = output_dir / "aligned_pointcloud.ply"
         result.pointcloud.save_ply(aligned_ply_path)
-        logger.info(f"  Saved: {aligned_ply_path}")
+        self.logger.info(f"  Saved: {aligned_ply_path}")
 
         # Step 8: Save metadata.json for viewer compatibility
+        metadata_initial_gps = (
+            result.pointcloud.origin_gps
+            if result.pointcloud.origin_gps is not None
+            else initial_gps
+        )
         metadata = {
             "video_name": video_name,
             "initial_gps_coordinates": [
-                result.pointcloud.origin_gps[0] if result.pointcloud.origin_gps else 0,
-                result.pointcloud.origin_gps[1] if result.pointcloud.origin_gps else 0,
+                metadata_initial_gps[0] if metadata_initial_gps else 0,
+                metadata_initial_gps[1] if metadata_initial_gps else 0,
             ],
-            "altitude": result.pointcloud.origin_gps[2] if result.pointcloud.origin_gps else 0,
+            "altitude": metadata_initial_gps[2] if metadata_initial_gps else 0,
             "frames": frame_count,
             "is_metric": result.pointcloud.is_metric,
             "point_count": len(result.pointcloud),
@@ -309,7 +332,7 @@ class ExperimentRunner:
         metadata_path = output_dir / "metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
-        logger.info(f"  Saved: {metadata_path}")
+        self.logger.info(f"  Saved: {metadata_path}")
 
         # Build result dict
         return {
@@ -336,28 +359,28 @@ class ExperimentRunner:
         with open(results_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
 
-        logger.info(f"Results saved to: {results_path}")
+        self.logger.info(f"Results saved to: {results_path}")
 
     def _print_summary(self, results: List[dict]) -> None:
         """Print experiment summary."""
         successful = [r for r in results if r.get("success", False)]
         failed = [r for r in results if not r.get("success", False)]
 
-        print("\n" + "=" * 50)
-        print("EXPERIMENT SUMMARY")
-        print("=" * 50)
-        print(f"Total videos: {len(results)}")
-        print(f"Successful: {len(successful)}")
-        print(f"Failed: {len(failed)}")
+        self.logger.info("\n" + "=" * 50)
+        self.logger.info("EXPERIMENT SUMMARY")
+        self.logger.info("=" * 50)
+        self.logger.info(f"Total videos: {len(results)}")
+        self.logger.info(f"Successful: {len(successful)}")
+        self.logger.info(f"Failed: {len(failed)}")
 
         if successful:
             total_points = sum(r.get("point_count", 0) for r in successful)
-            print(f"Total points: {total_points:,}")
+            self.logger.info(f"Total points: {total_points:,}")
 
             # Average metrics
             all_metrics = [r.get("metrics", {}) for r in successful]
             if all_metrics:
-                print("\nAverage Metrics:")
+                self.logger.info("\nAverage Metrics:")
                 metric_keys = set()
                 for m in all_metrics:
                     metric_keys.update(m.keys())
@@ -366,14 +389,14 @@ class ExperimentRunner:
                     values = [m.get(key) for m in all_metrics if key in m]
                     if values and all(isinstance(v, (int, float)) for v in values):
                         avg = sum(values) / len(values)
-                        print(f"  {key}: {avg:.4f}")
+                        self.logger.info(f"  {key}: {avg:.4f}")
 
         if failed:
-            print("\nFailed videos:")
+            self.logger.info("\nFailed videos:")
             for r in failed:
-                print(f"  - {r.get('video')}: {r.get('error', 'Unknown error')}")
+                self.logger.info(f"  - {r.get('video')}: {r.get('error', 'Unknown error')}")
 
-        print("=" * 50)
+        self.logger.info("=" * 50)
 
 
 def main():

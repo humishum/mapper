@@ -1,4 +1,7 @@
-"""GPS-based alignment and scale recovery."""
+"""GPS-based alignment and scale recovery.
+# This should evnetually be replaced/updated to do a bundle adjustment 
+
+"""
 
 from typing import Optional, Tuple
 import logging
@@ -8,7 +11,7 @@ from ..core.types import PointCloud, CameraPoses, GPSTrack, IMUData
 
 logger = logging.getLogger(__name__)
 
-# Alignment guardrails for low-information GPS tracks.
+# Alignment guardrails for sparse GPS tracks.
 MIN_GPS_TRAJECTORY_LENGTH_M = 2.0
 MIN_GPS_STD_DEV_M = 0.5
 
@@ -20,13 +23,9 @@ class GPSAligner:
     This class handles two main tasks:
     1. Scale recovery - Match reconstruction trajectory length to GPS trajectory
     2. Position/rotation alignment - Align reconstruction to GPS coordinates
-
-    For models that don't output metric scale (MASt3R, ORB-SLAM), this is
-    essential for producing usable geo-referenced output.
     """
 
     def __init__(self):
-        """Initialize GPS aligner."""
         pass
 
     def align(

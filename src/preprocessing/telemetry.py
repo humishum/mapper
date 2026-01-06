@@ -18,17 +18,15 @@ class TelemetryExtractor:
     - GPS track (latitude, longitude, altitude, timestamps)
     - IMU data (accelerometer, gyroscope, timestamps)
     - Camera orientations (quaternions, Hero8+)
-    - Gravity vectors (Hero8+)
 
     The gopro-py library is expected to be installed from:
     ~/repos/gopro-py/
-
-    Reference: GoPro GPMF (GoPro Metadata Format) telemetry
     """
 
     def __init__(self):
         """Initialize telemetry extractor."""
         self._gopropy_available = None
+        self._check_gopropy()
 
     def _check_gopropy(self) -> bool:
         """Check if gopro-py is available."""
@@ -49,25 +47,17 @@ class TelemetryExtractor:
 
         return self._gopropy_available
 
-    def extract(
+    def extract_gps_imu(
         self, video_path: Path
     ) -> Tuple[Optional[GPSTrack], Optional[IMUData]]:
-        """
-        Extract all telemetry from a GoPro video.
-
-        Args:
-            video_path: Path to GoPro video file (.MP4)
-
-        Returns:
-            Tuple of (GPSTrack, IMUData), either can be None if extraction fails
-        """
+        """Extract GPS and IMU data from a GoPro video."""
         video_path = Path(video_path)
 
         if not video_path.exists():
             logger.error(f"Video not found: {video_path}")
             return None, None
 
-        if not self._check_gopropy():
+        if not self._gopropy_available:
             logger.warning("Skipping telemetry extraction - gopro-py not available")
             return None, None
 
@@ -88,6 +78,7 @@ class TelemetryExtractor:
 
     def _extract_gps(self, telemetry) -> Optional[GPSTrack]:
         """Extract GPS track from telemetry."""
+        # todo: clean up this code, super weird
         try:
             # Import StreamNotFoundError here since it's only available when gopro-py is installed
             try:
@@ -329,9 +320,10 @@ class TelemetryExtractor:
                 result[:, i] = f(dst_timestamps)
             return result
 
-    def extract_gps_only(self, video_path: Path) -> Optional[GPSTrack]:
+    def _extract_gps_only(self, video_path: Path) -> Optional[GPSTrack]:
         """Extract only GPS data (faster than full extraction)."""
-        gps, _ = self.extract(video_path)
+        # Todo: clean this up, we extract GPS basically twice in extract_gps_imu and extract_initial_gps
+        gps, _ = self.extract_gps_imu(video_path)
         return gps
 
     def extract_initial_gps(
@@ -346,7 +338,7 @@ class TelemetryExtractor:
             Tuple of (latitude, longitude, altitude) or None
         """
         # Try gopro-py first
-        gps = self.extract_gps_only(video_path)
+        gps = self._extract_gps_only(video_path)
         if gps is not None and len(gps) > 0:
             valid_mask = (gps.latitudes != 0) & (gps.longitudes != 0)
             if valid_mask.any():

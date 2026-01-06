@@ -35,8 +35,6 @@ class ORBSLAMModel(BaseModel):
 
     Does NOT output metric scale without IMU or GPS.
 
-    For full ORB-SLAM3, consider using the orbslam3-python package:
-        pip install orbslam3-python
     """
 
     name = "orb_slam"
