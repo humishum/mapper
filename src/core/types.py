@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import numpy as np
 
 
@@ -155,11 +155,14 @@ class CameraPoses:
     poses: np.ndarray  # (M, 4, 4) transformation matrices
     timestamps: Optional[np.ndarray] = None  # (M,) timestamps in seconds
     intrinsics: Optional[np.ndarray] = None  # (3, 3) or (M, 3, 3) camera intrinsics
+    frame_indices: Optional[np.ndarray] = None  # (M,) indices in original frame list
 
     def __post_init__(self):
         """Validate pose data."""
         if self.poses.ndim != 3 or self.poses.shape[1:] != (4, 4):
             raise ValueError(f"Poses must be (M, 4, 4), got {self.poses.shape}")
+        if self.frame_indices is not None and len(self.frame_indices) != len(self.poses):
+            raise ValueError("frame_indices length must match pose count")
 
     def __len__(self) -> int:
         return self.poses.shape[0]
@@ -190,6 +193,8 @@ class ReconstructionResult:
     pointcloud: PointCloud
     poses: Optional[CameraPoses] = None
     metadata: dict = field(default_factory=dict)  # Model-specific info
+    chunks: Optional[List["ReconstructionResult"]] = None
+    window_metadata: dict = field(default_factory=dict)
 
 
 @dataclass

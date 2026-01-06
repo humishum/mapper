@@ -1,7 +1,7 @@
 """VGGT model wrapper for 3D reconstruction."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import logging
 import numpy as np
 
@@ -45,7 +45,9 @@ class VGGTModel(BaseModel):
 
     def __init__(self, config: Optional[dict] = None):
         super().__init__(config)
-        self.max_frames = self.config.get("max_frames", 100)
+        self.use_chunking = self.config.get("use_chunking", False)
+        self.window_size = self.config.get("window_size", 100)
+        self.window_overlap = self.config.get("window_overlap", 10)
         self.model_name = self.config.get("model_name", "facebook/VGGT-1B")
         self.weights_path = self.config.get("weights_path")
         self.device = self.config.get("device", "cuda")
@@ -61,7 +63,9 @@ class VGGTModel(BaseModel):
         """Return default VGGT configuration."""
         return {
             "model_name": "facebook/VGGT-1B",
-            "max_frames": 100,
+            "use_chunking": False,
+            "window_size": 100,
+            "window_overlap": 10,
             "device": "cuda",
             "image_size": 518,
             "preprocess_mode": "square",  # square | pad | crop
@@ -139,19 +143,100 @@ class VGGTModel(BaseModel):
         if len(images_list) == 0:
             raise ValueError(f"No images found in {video_input.image_dir}")
 
-        if self.max_frames is not None and len(images_list) > self.max_frames:
-            logger.warning(
-                f"Limiting to {self.max_frames} frames (had {len(images_list)}) for VRAM constraints"
+        windows = self.build_windows(
+            len(images_list),
+            self.use_chunking,
+            self.window_size,
+            self.window_overlap,
+        )
+        if len(windows) > 1:
+            logger.info(
+                "Chunking enabled: %d windows (size=%d, overlap=%d)",
+                len(windows),
+                self.window_size,
+                self.window_overlap,
             )
-            images_list = images_list[: self.max_frames]
 
+        chunk_results: List[ReconstructionResult] = []
+        use_window_dirs = len(windows) > 1
+        for window_id, (start, end) in enumerate(windows):
+            window_images = images_list[start:end]
+            frame_indices = list(range(start, end))
+            window_output_dir = (
+                output_dir / f"window_{window_id:03d}"
+                if use_window_dirs
+                else output_dir
+            )
+            chunk_results.append(
+                self._reconstruct_window(
+                    window_images,
+                    video_input,
+                    window_output_dir,
+                    frame_indices,
+                    window_id,
+                )
+            )
+
+        if len(chunk_results) == 1:
+            return chunk_results[0]
+
+        return ReconstructionResult(
+            pointcloud=chunk_results[0].pointcloud,
+            poses=chunk_results[0].poses,
+            metadata={
+                "model": "vggt",
+                "frames_processed": len(images_list),
+                "image_size": self.image_size,
+                "preprocess_mode": self.preprocess_mode,
+                "min_confidence": self.min_confidence,
+                "use_point_map": self.use_point_map,
+                "use_chunking": True,
+                "window_size": self.window_size,
+                "window_overlap": self.window_overlap,
+                "num_chunks": len(chunk_results),
+            },
+            chunks=chunk_results,
+        )
+
+    def _build_windows(self, total_images: int) -> List[Tuple[int, int]]:
+        """Backward-compatible window builder."""
+        return self.build_windows(
+            total_images,
+            self.use_chunking,
+            self.window_size,
+            self.window_overlap,
+        )
+
+    def _reconstruct_window(
+        self,
+        images_list: List[str],
+        video_input: VideoInput,
+        output_dir: Path,
+        frame_indices: List[int],
+        window_id: int,
+    ) -> ReconstructionResult:
+        """Run VGGT reconstruction for a single window."""
         logger.info(f"VGGT: Processing {len(images_list)} frames")
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         images = self._load_images(images_list)
 
         outputs = self._run_inference(images)
         pointcloud = self._build_pointcloud(images, outputs)
-        poses = self._extract_poses(images, outputs, video_input)
+        poses = self._extract_poses(
+            images, outputs, video_input, frame_indices=frame_indices
+        )
+
+        window_metadata = {
+            "window_id": window_id,
+            "frame_start": frame_indices[0] if frame_indices else 0,
+            "frame_end": frame_indices[-1] if frame_indices else 0,
+            "frame_indices": frame_indices,
+            "window_size": self.window_size,
+            "window_overlap": self.window_overlap,
+        }
 
         return ReconstructionResult(
             pointcloud=pointcloud,
@@ -164,6 +249,7 @@ class VGGTModel(BaseModel):
                 "min_confidence": self.min_confidence,
                 "use_point_map": self.use_point_map,
             },
+            window_metadata=window_metadata,
         )
 
     def _load_images(self, image_paths: list) -> list:
@@ -292,7 +378,11 @@ class VGGTModel(BaseModel):
         return imgs.reshape(-1, 3)
 
     def _extract_poses(
-        self, images, outputs, video_input: VideoInput
+        self,
+        images,
+        outputs,
+        video_input: VideoInput,
+        frame_indices: Optional[List[int]] = None,
     ) -> Optional[CameraPoses]:
         """Extract camera poses from VGGT outputs."""
         from vggt.utils.pose_enc import pose_encoding_to_extri_intri
@@ -309,21 +399,31 @@ class VGGTModel(BaseModel):
         if extrinsic.ndim == 2:
             extrinsic = extrinsic.reshape(-1, 3, 4)
 
-        poses = np.zeros((extrinsic.shape[0], 4, 4), dtype=np.float32)
-        poses[:, :3, :4] = extrinsic.astype(np.float32)
-        poses[:, 3, 3] = 1.0
+        poses_w2c = np.zeros((extrinsic.shape[0], 4, 4), dtype=np.float32)
+        poses_w2c[:, :3, :4] = extrinsic.astype(np.float32)
+        poses_w2c[:, 3, 3] = 1.0
+
+        # VGGT extrinsics are world-to-camera; invert to get camera-to-world.
+        poses = np.linalg.inv(poses_w2c)
 
         intrinsics = intrinsic.squeeze(0).cpu().numpy()
 
+        if frame_indices is None:
+            frame_indices = list(range(video_input.frame_count))
+        frame_indices = np.array(frame_indices, dtype=np.int64)
+
         timestamps = None
-        if video_input.frame_count > 0:
-            timestamps = video_input.get_frame_timestamps()
-            if len(timestamps) > poses.shape[0]:
-                step = len(timestamps) // poses.shape[0]
+        if len(frame_indices) > 0 and video_input.fps > 0:
+            timestamps = frame_indices / float(video_input.fps)
+        if len(frame_indices) > poses.shape[0]:
+            step = len(frame_indices) // poses.shape[0]
+            frame_indices = frame_indices[::step][: poses.shape[0]]
+            if timestamps is not None:
                 timestamps = timestamps[::step][: poses.shape[0]]
 
         return CameraPoses(
             poses=poses,
             timestamps=timestamps,
             intrinsics=intrinsics.astype(np.float32),
+            frame_indices=frame_indices,
         )

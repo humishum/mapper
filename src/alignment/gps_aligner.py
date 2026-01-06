@@ -34,6 +34,7 @@ class GPSAligner:
         poses: CameraPoses,
         gps_track: GPSTrack,
         imu_data: Optional[IMUData] = None,
+        allow_scale: bool = True,
     ) -> PointCloud:
         """
         Align point cloud to GPS coordinates.
@@ -61,12 +62,16 @@ class GPSAligner:
             logger.warning("Not enough GPS points for alignment, returning original")
             return pointcloud
 
-        # Step 1: Scale recovery
-        scale = self.compute_scale(poses, gps_track)
-        if not np.isfinite(scale):
-            logger.warning("Non-finite scale factor, skipping GPS alignment")
-            return pointcloud
-        logger.info(f"Computed scale factor: {scale:.4f}")
+        # Step 1: Scale recovery (optional)
+        if allow_scale:
+            scale = self.compute_scale(poses, gps_track)
+            if not np.isfinite(scale):
+                logger.warning("Non-finite scale factor, skipping GPS alignment")
+                return pointcloud
+            logger.info(f"Computed scale factor: {scale:.4f}")
+        else:
+            scale = 1.0
+            logger.info("Skipping GPS scale adjustment (metric alignment)")
 
         # Step 2: Get positions in local ENU coordinates
         pose_positions = poses.get_positions()

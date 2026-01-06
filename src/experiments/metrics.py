@@ -118,9 +118,15 @@ class MetricsCalculator:
         gps_length = gps_track.get_trajectory_length_meters()
 
         scale_ratio = pose_length / gps_length if gps_length > 0 else 0.0
+        gps_enu = gps_track.to_local_enu()
+        gps_std = float(np.mean(np.std(gps_enu, axis=0))) if len(gps_enu) else 0.0
+        gps_var = float(np.mean(np.var(gps_enu, axis=0))) if len(gps_enu) else 0.0
 
         metrics = {
+            "gps_point_count": len(gps_track),
             "gps_trajectory_length_m": gps_length,
+            "gps_std_dev_m": gps_std,
+            "gps_variance_m2": gps_var,
             "scale_ratio_before_alignment": scale_ratio,
         }
 

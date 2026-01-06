@@ -8,10 +8,11 @@ import json
 import yaml
 import logging
 import sys
+import numpy as np
 
 from ..models import get_model
 from ..preprocessing import VideoProcessor, TelemetryExtractor
-from ..alignment import GPSAligner
+from ..alignment import GPSAligner, WindowAligner
 from ..core.types import VideoInput
 from .metrics import MetricsCalculator
 from .utils import get_git_info
@@ -37,6 +38,7 @@ class ExperimentConfig:
     align_to_gps: bool = True
     force_reprocess: bool = False
     frame_cache_dir: Optional[Path] = None
+    alignment_config: dict = field(default_factory=dict)
 
     # Video filtering (optional)
     video_extensions: List[str] = field(default_factory=lambda: DEFAULT_VIDEO_EXTENSIONS)
@@ -75,17 +77,21 @@ class ExperimentRunner:
         self.video_processor = VideoProcessor(fps=config.fps)
         self.telemetry_extractor = TelemetryExtractor()
         self.gps_aligner = GPSAligner()
+        self.window_aligner = WindowAligner(config=self.config.alignment_config)
         self.metrics_calculator = MetricsCalculator()
 
         # lazy load model 
         self._model = None
 
-        # can probably clean this up later and integrate better with sub loggers 
-        # logger.propogate = False
+        # Setup experiment directory
+        self.exp_dir = self._setup_experiment_dir()
+
+        # Setup logger with custom handlers to avoid duplication with root logger
         self.logger = logging.getLogger(__name__)
+        self.logger.propagate = False 
         self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-        file_handler = logging.FileHandler(self.config.output_folder / "experiment.log", mode='a')
+        file_handler = logging.FileHandler(self.exp_dir / "experiment.log", mode='a')
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(formatter)
         stream_handler = logging.StreamHandler(sys.stdout)
@@ -119,6 +125,7 @@ class ExperimentRunner:
             force_reprocess=raw.get("force_reprocess", False),
             frame_cache_dir=raw.get("frame_cache_dir"),
             video_extensions=raw.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
+            alignment_config=raw.get("alignment_config", {}),
         )
 
         return cls(config)
@@ -134,15 +141,12 @@ class ExperimentRunner:
         self.logger.info(f"Model: {self.config.model}")
         self.logger.info(f"Input folder: {self.config.input_folder}")
 
-        # Setup experiment directory
-        exp_dir = self._setup_experiment_dir()
-
         # Find videos
         videos = self._find_videos()
         self.logger.info(f"Found {len(videos)} videos to process")
 
         if len(videos) == 0:
-            logger.warning("No videos found!")
+            self.logger.warning("No videos found!")
             return []
 
         # Load model
@@ -154,11 +158,11 @@ class ExperimentRunner:
             self.logger.info(f"[{i}/{len(videos)}] Processing: {video_path.name}")
 
             try:
-                result = self._process_video(video_path, exp_dir)
+                result = self._process_video(video_path, self.exp_dir)
                 results.append(result)
                 self.logger.info(f"  Success: {result.get('point_count', 0)} points")
             except Exception as e:
-                logger.error(f"  Error: {e}")
+                self.logger.error(f"  Error: {e}")
                 results.append({
                     "video": video_path.name,
                     "error": str(e),
@@ -166,12 +170,12 @@ class ExperimentRunner:
                 })
 
         # Save results
-        self._save_results(exp_dir, results)
+        self._save_results(self.exp_dir, results)
 
         # Print summary
         self._print_summary(results)
 
-        self.logger.info(f"Experiment complete. Results in: {exp_dir}")
+        self.logger.info(f"Experiment complete. Results in: file://{self.exp_dir}")
         return results
 
     def _load_model(self) -> None:
@@ -217,6 +221,7 @@ class ExperimentRunner:
                 if self.config.frame_cache_dir is not None
                 else None
             ),
+            "alignment_config": self.config.alignment_config,
             "timestamp": timestamp,
             "git_commit": git_commit,
             "git_status": git_status,
@@ -285,6 +290,24 @@ class ExperimentRunner:
         self.logger.info("  Running reconstruction...")
         result = self._model.reconstruct(video_input, output_dir)
 
+        # Step 4b: Align and merge windowed outputs (if chunking was used)
+        if result.chunks:
+            self.logger.info(
+                "  Aligning %d reconstruction windows...", len(result.chunks)
+            )
+            merged_pointcloud, merged_poses, alignment_metadata = (
+                self.window_aligner.align_and_merge(
+                    result.chunks,
+                    result.pointcloud.is_metric,
+                )
+            )
+            result.pointcloud = merged_pointcloud
+            result.poses = merged_poses
+            result.metadata = {
+                **result.metadata,
+                "window_alignment": alignment_metadata,
+            }
+
         # Step 5: Align to GPS (if enabled and data available)
         if (
             self.config.align_to_gps
@@ -292,11 +315,20 @@ class ExperimentRunner:
             and result.poses is not None
         ):
             self.logger.info("  Aligning to GPS...")
+            gps_scale_min_std_dev_m = float(
+                self.config.alignment_config.get("gps_scale_min_std_dev_m", 0.5)
+            )
+            gps_enu = gps_track.to_local_enu()
+            gps_std = float(np.mean(np.std(gps_enu, axis=0))) if len(gps_enu) else 0.0
+            allow_scale = not result.pointcloud.is_metric or (
+                gps_std >= gps_scale_min_std_dev_m
+            )
             result.pointcloud = self.gps_aligner.align(
                 result.pointcloud,
                 result.poses,
                 gps_track,
                 imu_data,
+                allow_scale=allow_scale,
             )
 
         # Step 6: Compute metrics

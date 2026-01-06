@@ -8,6 +8,7 @@ retrieval_path: null  # Set to path for retrieval data
 image_size: 512  # Input image size for model
 
 # Windowing for long videos
+use_chunking: true
 window_size: 500  # Max frames per window
 window_overlap: 20  # Overlap between windows
 

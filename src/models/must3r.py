@@ -1,7 +1,7 @@
-"""MASt3R model wrapper for 3D reconstruction."""
+"""must3r model wrapper for 3D reconstruction."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import os
 import logging
 import numpy as np
@@ -21,9 +21,6 @@ class MASt3RModel(BaseModel):
     """
     Must3r: Multi-view Stereo 3D Reconstruction.
 
-    MASt3R produces high-quality dense point clouds from image sequences.
-    It does NOT output metric scale - the scale is arbitrary and needs
-    to be recovered using GPS or other ground truth.
 
     Outputs:
     - Dense colored point cloud
@@ -48,7 +45,7 @@ class MASt3RModel(BaseModel):
         self.image_size = self.config.get("image_size", 512)
 
         # Processing parameters
-        self.max_frames = self.config.get("max_frames")  # None = no limit
+        self.use_chunking = self.config.get("use_chunking", False)
         self.window_size = self.config.get("window_size", 500)
         self.window_overlap = self.config.get("window_overlap", 20)
         self.confidence_thresholds = self.config.get(
@@ -64,10 +61,10 @@ class MASt3RModel(BaseModel):
             "weights_path": None,  # Required - must be set
             "retrieval_path": None,  # Required - must be set
             "image_size": 512,
-            "max_frames": None,  # None = no limit, set for low VRAM (e.g., 50)
+            "use_chunking": False,
             "window_size": 500,
             "window_overlap": 20,
-            "confidence_thresholds": [5.0, 2.0, 1.5, 1.05],
+            "confidence_thresholds": [5.0], # [5.0, 2.0, 1.5, 1.05],
             "num_mem_imgs": 50,
             "subsample": 2,
             "min_conf_thr": 1.05,
@@ -118,8 +115,6 @@ class MASt3RModel(BaseModel):
         Returns:
             ReconstructionResult with point cloud, poses, and metadata
         """
-        from must3r.demo.gradio import get_reconstructed_scene, get_3D_model_from_scene
-
         self.ensure_loaded()
 
         output_dir = Path(output_dir)
@@ -132,12 +127,81 @@ class MASt3RModel(BaseModel):
         if len(images) == 0:
             raise ValueError(f"No images found in {video_input.image_dir}")
 
-        # Limit frames if max_frames is set (for low VRAM)
-        if self.max_frames is not None and len(images) > self.max_frames:
-            logger.warning(
-                f"Limiting to {self.max_frames} frames (had {len(images)}) for VRAM constraints"
+        windows = self.build_windows(
+            len(images),
+            self.use_chunking,
+            self.window_size,
+            self.window_overlap,
+        )
+        if len(windows) > 1:
+            logger.info(
+                "Chunking enabled: %d windows (size=%d, overlap=%d)",
+                len(windows),
+                self.window_size,
+                self.window_overlap,
             )
-            images = images[:self.max_frames]
+
+        chunk_results: List[ReconstructionResult] = []
+        use_window_dirs = len(windows) > 1
+        for window_id, (start, end) in enumerate(windows):
+            window_images = images[start:end]
+            frame_indices = list(range(start, end))
+            window_output_dir = (
+                output_dir / f"window_{window_id:03d}"
+                if use_window_dirs
+                else output_dir
+            )
+            chunk_results.append(
+                self._reconstruct_window(
+                    window_images,
+                    video_input,
+                    window_output_dir,
+                    frame_indices,
+                    window_id,
+                )
+            )
+
+        if len(chunk_results) == 1:
+            return chunk_results[0]
+
+        return ReconstructionResult(
+            pointcloud=chunk_results[0].pointcloud,
+            poses=chunk_results[0].poses,
+            metadata={
+                "model": "must3r",
+                "image_count": len(images),
+                "thresholds": self.confidence_thresholds,
+                "window_size": self.window_size,
+                "window_overlap": self.window_overlap,
+                "image_size": self.image_size,
+                "use_chunking": True,
+                "num_chunks": len(chunk_results),
+            },
+            chunks=chunk_results,
+        )
+
+    def _build_windows(self, total_images: int) -> List[Tuple[int, int]]:
+        """Backward-compatible window builder."""
+        return self.build_windows(
+            total_images,
+            self.use_chunking,
+            self.window_size,
+            self.window_overlap,
+        )
+
+    def _reconstruct_window(
+        self,
+        images: List[str],
+        video_input: VideoInput,
+        output_dir: Path,
+        frame_indices: List[int],
+        window_id: int,
+    ) -> ReconstructionResult:
+        """Run reconstruction on a single window of images."""
+        from must3r.demo.gradio import get_reconstructed_scene, get_3D_model_from_scene
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Running MASt3R reconstruction on {len(images)} images")
         logger.info(f"Output directory: {output_dir}")
@@ -198,7 +262,16 @@ class MASt3RModel(BaseModel):
         pointcloud = self._extract_pointcloud(scene, output_dir)
 
         # Extract camera poses from scene
-        poses = self._extract_poses(scene, video_input)
+        poses = self._extract_poses(scene, video_input, frame_indices=frame_indices)
+
+        window_metadata = {
+            "window_id": window_id,
+            "frame_start": frame_indices[0] if frame_indices else 0,
+            "frame_end": frame_indices[-1] if frame_indices else 0,
+            "frame_indices": frame_indices,
+            "window_size": self.window_size,
+            "window_overlap": self.window_overlap,
+        }
 
         return ReconstructionResult(
             pointcloud=pointcloud,
@@ -210,6 +283,7 @@ class MASt3RModel(BaseModel):
                 "window_size": self.window_size,
                 "image_size": self.image_size,
             },
+            window_metadata=window_metadata,
         )
 
     def _extract_pointcloud(self, scene, output_dir: Path) -> PointCloud:
@@ -261,41 +335,68 @@ class MASt3RModel(BaseModel):
                 )
         except Exception as e:
             logger.warning(f"Could not extract point cloud from scene: {e}")
-
-        # Last resort: return empty point cloud
-        logger.warning("Returning empty point cloud - extraction failed")
-        return PointCloud(points=np.zeros((0, 3), dtype=np.float32))
+            raise
+        # TODO: handle this better
+        # logger.warning("Returning empty point cloud - extraction failed")
+        # return PointCloud(points=np.zeros((0, 3), dtype=np.float32))
 
     def _extract_poses(
-        self, scene, video_input: VideoInput
+        self,
+        scene,
+        video_input: VideoInput,
+        frame_indices: Optional[List[int]] = None,
     ) -> Optional[CameraPoses]:
         """Extract camera poses from MASt3R scene object."""
         try:
             if hasattr(scene, "cams2world") and scene.cams2world is not None:
                 poses = scene.cams2world
-                if hasattr(poses, "cpu"):
+                if isinstance(poses, list):
+                    poses = np.stack(
+                        [
+                            p.cpu().numpy() if hasattr(p, "cpu") else np.asarray(p)
+                            for p in poses
+                        ],
+                        axis=0,
+                    )
+                elif hasattr(poses, "cpu"):
                     poses = poses.cpu().numpy()
+                else:
+                    poses = np.asarray(poses)
 
                 # Ensure correct shape
                 if poses.ndim == 2:  # (N, 16) flattened
                     poses = poses.reshape(-1, 4, 4)
 
                 # Get timestamps from video input
+                if frame_indices is None:
+                    frame_indices = list(range(video_input.frame_count))
+                frame_indices = np.array(frame_indices, dtype=np.int64)
+
                 timestamps = None
-                if video_input.frame_count > 0:
-                    timestamps = video_input.get_frame_timestamps()
-                    # Match timestamps to number of poses
-                    if len(timestamps) > poses.shape[0]:
-                        # Subsampling was applied
-                        step = len(timestamps) // poses.shape[0]
+                if len(frame_indices) > 0 and video_input.fps > 0:
+                    timestamps = frame_indices / float(video_input.fps)
+
+                if len(frame_indices) > poses.shape[0]:
+                    step = len(frame_indices) // poses.shape[0]
+                    frame_indices = frame_indices[::step][: poses.shape[0]]
+                    if timestamps is not None:
                         timestamps = timestamps[::step][: poses.shape[0]]
 
                 # Try to get intrinsics
                 intrinsics = None
                 if hasattr(scene, "focals") and scene.focals is not None:
                     focals = scene.focals
-                    if hasattr(focals, "cpu"):
+                    if isinstance(focals, list):
+                        focals = np.array(
+                            [
+                                f.cpu().numpy() if hasattr(f, "cpu") else np.asarray(f)
+                                for f in focals
+                            ]
+                        )
+                    elif hasattr(focals, "cpu"):
                         focals = focals.cpu().numpy()
+                    else:
+                        focals = np.asarray(focals)
                     # Build intrinsics matrix
                     # Assume principal point at image center
                     cx, cy = self.image_size / 2, self.image_size / 2
@@ -313,6 +414,7 @@ class MASt3RModel(BaseModel):
                     poses=poses.astype(np.float32),
                     timestamps=timestamps,
                     intrinsics=intrinsics,
+                    frame_indices=frame_indices,
                 )
         except Exception as e:
             logger.warning(f"Could not extract poses from scene: {e}")

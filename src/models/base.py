@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import logging
 
 from ..core.types import ReconstructionResult, VideoInput
@@ -87,6 +87,36 @@ class BaseModel(ABC):
             logger.info(f"Loading {self.name} model...")
             self.load()
             self._is_loaded = True
+
+    def build_windows(
+        self,
+        total_images: int,
+        use_chunking: bool,
+        window_size: Optional[int],
+        window_overlap: Optional[int],
+    ) -> List[Tuple[int, int]]:
+        """Build sliding windows for chunked reconstruction."""
+        if not use_chunking or window_size is None:
+            return [(0, total_images)]
+
+        window_size = int(window_size)
+        window_overlap = int(window_overlap or 0)
+
+        if window_size <= 0:
+            raise ValueError("window_size must be positive")
+        if window_overlap >= window_size:
+            raise ValueError("window_overlap must be smaller than window_size")
+
+        step = window_size - window_overlap
+        windows = []
+        start = 0
+        while start < total_images:
+            end = min(start + window_size, total_images)
+            windows.append((start, end))
+            if end == total_images:
+                break
+            start += step
+        return windows
 
     def get_capabilities(self) -> dict:
         """Return model capabilities as a dictionary."""

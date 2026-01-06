@@ -12,8 +12,10 @@ model_config:
   retrieval_path: "/home/ape/repos/mapper/weights/MUSt3R_512_retrieval_trainingfree.pth"
   image_size: 512
 
-  # VRAM limit: max 50 frames per video (increase for larger GPUs)
-  max_frames: 50
+  # Chunked processing for VRAM limits
+  use_chunking: true
+  window_size: 50
+  window_overlap: 10
 
   # Confidence thresholds for PLY output
   confidence_thresholds:
@@ -32,3 +34,14 @@ fps: 10
 align_to_gps: true
 force_reprocess: false
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+alignment_config:
+  window_alignment_method: "pose_overlap"
+  min_overlap_frames: 10
+  allow_scale: "auto"
+  pose_overlap_max_rmse: 2.0
+  icp_voxel_size: 0.1
+  icp_max_corr_dist: 0.2
+  icp_init: "none"
+  gps_scale_min_std_dev_m: 0.5
+  save_alignment_debug: false

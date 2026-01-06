@@ -10,7 +10,9 @@ model: "vggt"
 model_config:
   model_name: "facebook/VGGT-1B"
   weights_path: null  # Optional: local model.pt if you downloaded manually
-  max_frames: 3
+  use_chunking: true
+  window_size: 3
+  window_overlap: 1
   device: "cuda"
   image_size: 518
   preprocess_mode: "square"  # square | pad | crop
@@ -26,3 +28,14 @@ fps: 10
 align_to_gps: true
 force_reprocess: false
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+alignment_config:
+  window_alignment_method: "pose_overlap"
+  min_overlap_frames: 1
+  allow_scale: "auto"
+  pose_overlap_max_rmse: 2.0
+  icp_voxel_size: 0.1
+  icp_max_corr_dist: 0.2
+  icp_init: "none"
+  gps_scale_min_std_dev_m: 0.5
+  save_alignment_debug: false
