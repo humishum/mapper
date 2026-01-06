@@ -17,9 +17,7 @@ class WindowAligner:
         self.method = config.get("window_alignment_method", "pose_overlap")
         self.min_overlap_frames = int(config.get("min_overlap_frames", 10))
         self.allow_scale = config.get("allow_scale", "auto")
-        self.pose_overlap_max_rmse = float(
-            config.get("pose_overlap_max_rmse", 2.0)
-        )
+        self.pose_overlap_max_rmse = float(config.get("pose_overlap_max_rmse", 2.0))
         self.icp_voxel_size = float(config.get("icp_voxel_size", 0.1))
         self.icp_max_corr_dist = float(config.get("icp_max_corr_dist", 0.2))
         self.icp_init = config.get("icp_init", "none")
@@ -65,7 +63,9 @@ class WindowAligner:
         poses_available = all(chunk.poses is not None for chunk in chunks)
         for chunk, (scale, rotation, translation) in zip(chunks, transforms):
             transformed_clouds.append(
-                self._transform_pointcloud(chunk.pointcloud, scale, rotation, translation)
+                self._transform_pointcloud(
+                    chunk.pointcloud, scale, rotation, translation
+                )
             )
             if poses_available and chunk.poses is not None:
                 transformed_poses.append(
@@ -73,9 +73,7 @@ class WindowAligner:
                 )
 
         merged_cloud = self._merge_pointclouds(transformed_clouds)
-        merged_poses = (
-            self._merge_poses(transformed_poses) if poses_available else None
-        )
+        merged_poses = self._merge_poses(transformed_poses) if poses_available else None
 
         alignment_metadata = {
             "method": self.method,
@@ -130,7 +128,9 @@ class WindowAligner:
                             "scale": scale,
                         }
                     )
-                    self._maybe_add_transform_debug(log_entry, scale, rotation, translation)
+                    self._maybe_add_transform_debug(
+                        log_entry, scale, rotation, translation
+                    )
                     return (scale, rotation, translation), log_entry
 
                 logger.warning(
@@ -180,12 +180,10 @@ class WindowAligner:
 
         if prev.frame_indices is not None and curr.frame_indices is not None:
             prev_map = {
-                int(idx): prev_positions[i]
-                for i, idx in enumerate(prev.frame_indices)
+                int(idx): prev_positions[i] for i, idx in enumerate(prev.frame_indices)
             }
             curr_map = {
-                int(idx): curr_positions[i]
-                for i, idx in enumerate(curr.frame_indices)
+                int(idx): curr_positions[i] for i, idx in enumerate(curr.frame_indices)
             }
             overlap_indices = sorted(set(prev_map) & set(curr_map))
             if len(overlap_indices) >= self.min_overlap_frames:
@@ -225,7 +223,7 @@ class WindowAligner:
             R = U @ Vt
 
         if allow_scale:
-            var_src = np.mean(np.sum(src_centered ** 2, axis=1))
+            var_src = np.mean(np.sum(src_centered**2, axis=1))
             scale = np.sum(S) / var_src if var_src > 0 else 1.0
         else:
             scale = 1.0
@@ -263,9 +261,7 @@ class WindowAligner:
 
         init_transform = np.eye(4)
         if self.icp_init == "ransac":
-            init_transform = self._estimate_ransac_transform(
-                source_down, target_down
-            )
+            init_transform = self._estimate_ransac_transform(source_down, target_down)
 
         result = o3d.pipelines.registration.registration_icp(
             source_down,
@@ -283,34 +279,34 @@ class WindowAligner:
         radius_feature = self.icp_voxel_size * 5
         source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
             source_down,
-            o3d.geometry.KDTreeSearchParamHybrid(
-                radius=radius_feature, max_nn=100
-            ),
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100),
         )
         target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
             target_down,
-            o3d.geometry.KDTreeSearchParamHybrid(
-                radius=radius_feature, max_nn=100
-            ),
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100),
         )
 
         distance_threshold = self.icp_voxel_size * 1.5
-        result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-            source_down,
-            target_down,
-            source_fpfh,
-            target_fpfh,
-            True,
-            distance_threshold,
-            o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-            3,
-            [
-                o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
-                o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
-                    distance_threshold
-                ),
-            ],
-            o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999),
+        result = (
+            o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+                source_down,
+                target_down,
+                source_fpfh,
+                target_fpfh,
+                True,
+                distance_threshold,
+                o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+                3,
+                [
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(
+                        0.9
+                    ),
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
+                        distance_threshold
+                    ),
+                ],
+                o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999),
+            )
         )
 
         return result.transformation
@@ -409,9 +405,7 @@ class WindowAligner:
                 if poses.frame_indices is not None:
                     frame_idx = int(poses.frame_indices[i])
                 timestamp = (
-                    float(poses.timestamps[i])
-                    if poses.timestamps is not None
-                    else None
+                    float(poses.timestamps[i]) if poses.timestamps is not None else None
                 )
                 intrinsic = None
                 if poses.intrinsics is not None:

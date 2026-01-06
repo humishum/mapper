@@ -26,7 +26,9 @@ class BaseModel(ABC):
     name: str = "base"
 
     # Capability flags (informational - used for experiment tracking)
-    outputs_metric_scale: bool = False  # Does the model output metric-scale coordinates?
+    outputs_metric_scale: bool = (
+        False  # Does the model output metric-scale coordinates?
+    )
     outputs_poses: bool = False  # Does the model output camera poses?
     outputs_confidence: bool = False  # Does the model output per-point confidence?
     supports_video_input: bool = False  # Can the model process video directly?

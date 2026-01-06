@@ -36,6 +36,7 @@ class TelemetryExtractor:
         try:
             import gopropy
             from gopropy import StreamNotFoundError
+
             self._gopropy_available = True
             logger.debug("gopro-py library available")
         except ImportError:
@@ -86,7 +87,7 @@ class TelemetryExtractor:
             except ImportError:
                 # If not available, use a generic exception
                 StreamNotFoundError = Exception
-            
+
             # Try different GPS stream names
             gps_stream = None
             for name in [
@@ -95,7 +96,7 @@ class TelemetryExtractor:
                 "GPS9",
                 "GPS (Lat., Long., Alt., ...)",
                 "GPS (Lat., Long., Alt., 2D speed, 3D speed)",
-                "GPS (Lat., Long., Alt., 2D speed, 3D speed)"
+                "GPS (Lat., Long., Alt., 2D speed, 3D speed)",
             ]:
                 try:
                     print(f"Trying to get GPS stream: {name}")
@@ -301,7 +302,8 @@ class TelemetryExtractor:
 
         if data.ndim == 1:
             f = interp1d(
-                src_timestamps, data,
+                src_timestamps,
+                data,
                 kind="linear",
                 bounds_error=False,
                 fill_value="extrapolate",
@@ -312,7 +314,8 @@ class TelemetryExtractor:
             result = np.zeros((len(dst_timestamps), data.shape[1]))
             for i in range(data.shape[1]):
                 f = interp1d(
-                    src_timestamps, data[:, i],
+                    src_timestamps,
+                    data[:, i],
                     kind="linear",
                     bounds_error=False,
                     fill_value="extrapolate",
@@ -343,11 +346,7 @@ class TelemetryExtractor:
             valid_mask = (gps.latitudes != 0) & (gps.longitudes != 0)
             if valid_mask.any():
                 first_idx = int(np.flatnonzero(valid_mask)[0])
-                alt = (
-                    gps.altitudes[first_idx]
-                    if gps.altitudes is not None
-                    else 0.0
-                )
+                alt = gps.altitudes[first_idx] if gps.altitudes is not None else 0.0
                 return (gps.latitudes[first_idx], gps.longitudes[first_idx], alt)
 
         # Fall back to EXIF

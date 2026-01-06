@@ -270,9 +270,7 @@ class VGGTModel(BaseModel):
                     self.preprocess_mode,
                     self.image_size,
                 )
-            images = load_and_preprocess_images(
-                image_paths, mode=self.preprocess_mode
-            )
+            images = load_and_preprocess_images(image_paths, mode=self.preprocess_mode)
         else:
             raise ValueError(
                 f"Invalid preprocess_mode '{self.preprocess_mode}'. "
@@ -311,9 +309,7 @@ class VGGTModel(BaseModel):
         if pose_enc is None:
             raise ValueError("VGGT outputs missing pose_enc")
 
-        extrinsic, intrinsic = pose_encoding_to_extri_intri(
-            pose_enc, images.shape[-2:]
-        )
+        extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images.shape[-2:])
 
         if self.use_point_map:
             points_map = outputs.get("world_points")
@@ -391,9 +387,7 @@ class VGGTModel(BaseModel):
         if pose_enc is None:
             return None
 
-        extrinsic, intrinsic = pose_encoding_to_extri_intri(
-            pose_enc, images.shape[-2:]
-        )
+        extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images.shape[-2:])
 
         extrinsic = extrinsic.squeeze(0).cpu().numpy()
         if extrinsic.ndim == 2:

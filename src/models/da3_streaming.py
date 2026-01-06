@@ -284,7 +284,9 @@ class DA3StreamingModel(BaseModel):
                         return candidate.resolve()
                 config_path = (self.da3_dir or cwd) / config_path
             return config_path.resolve()
-        return (self.da3_dir or self._resolve_da3_dir()) / "configs" / "base_config.yaml"
+        return (
+            (self.da3_dir or self._resolve_da3_dir()) / "configs" / "base_config.yaml"
+        )
 
     def _align_timestamps(
         self,

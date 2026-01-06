@@ -1,5 +1,5 @@
 """GPS-based alignment and scale recovery.
-# This should evnetually be replaced/updated to do a bundle adjustment 
+# This should evnetually be replaced/updated to do a bundle adjustment
 
 """
 
@@ -80,7 +80,9 @@ class GPSAligner:
             logger.warning("Non-finite pose or GPS positions, skipping GPS alignment")
             return pointcloud
         if not np.isfinite(pointcloud.points).all():
-            logger.warning("Non-finite pointcloud points detected, skipping GPS alignment")
+            logger.warning(
+                "Non-finite pointcloud points detected, skipping GPS alignment"
+            )
             return pointcloud
         gps_traj_len = gps_track.get_trajectory_length_meters()
         gps_std = float(np.mean(np.std(gps_enu, axis=0)))
@@ -91,7 +93,7 @@ class GPSAligner:
                 gps_std,
             )
             return pointcloud
-        
+
         logger.debug(
             "GPS align stats: pose min %s max %s | gps min %s max %s",
             np.min(pose_positions, axis=0),
@@ -101,9 +103,7 @@ class GPSAligner:
         )
 
         # Step 3: Subsample to match counts
-        pose_positions, gps_enu = self._align_sample_counts(
-            pose_positions, gps_enu
-        )
+        pose_positions, gps_enu = self._align_sample_counts(pose_positions, gps_enu)
 
         # Step 4: Apply scale to pose positions
         scaled_poses = pose_positions * scale
@@ -310,11 +310,13 @@ class GPSAligner:
         else:
             # General case - Rodrigues' rotation formula
             s = np.linalg.norm(v)
-            vx = np.array([
-                [0, -v[2], v[1]],
-                [v[2], 0, -v[0]],
-                [-v[1], v[0], 0],
-            ])
+            vx = np.array(
+                [
+                    [0, -v[2], v[1]],
+                    [v[2], 0, -v[0]],
+                    [-v[1], v[0], 0],
+                ]
+            )
             correction = np.eye(3) + vx + vx @ vx * (1 - c) / (s * s)
 
         return correction @ rotation
@@ -326,11 +328,13 @@ class GPSAligner:
     ) -> np.ndarray:
         """Convert axis-angle to rotation matrix using Rodrigues' formula."""
         axis = axis / np.linalg.norm(axis)
-        K = np.array([
-            [0, -axis[2], axis[1]],
-            [axis[2], 0, -axis[0]],
-            [-axis[1], axis[0], 0],
-        ])
+        K = np.array(
+            [
+                [0, -axis[2], axis[1]],
+                [axis[2], 0, -axis[0]],
+                [-axis[1], axis[0], 0],
+            ]
+        )
         return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * K @ K
 
     def compute_alignment_error(
@@ -351,9 +355,7 @@ class GPSAligner:
         gps_enu = gps_track.to_local_enu()
 
         # Align sample counts
-        pose_positions, gps_enu = self._align_sample_counts(
-            pose_positions, gps_enu
-        )
+        pose_positions, gps_enu = self._align_sample_counts(pose_positions, gps_enu)
 
         # Apply transformation
         transformed = (rotation @ (pose_positions * scale).T).T + translation
@@ -362,7 +364,7 @@ class GPSAligner:
         errors = np.linalg.norm(transformed - gps_enu, axis=1)
 
         return {
-            "rmse_meters": float(np.sqrt(np.mean(errors ** 2))),
+            "rmse_meters": float(np.sqrt(np.mean(errors**2))),
             "max_error_meters": float(np.max(errors)),
             "mean_error_meters": float(np.mean(errors)),
             "median_error_meters": float(np.median(errors)),

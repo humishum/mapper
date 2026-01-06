@@ -139,9 +139,12 @@ class VideoProcessor:
             result = subprocess.run(
                 [
                     "ffprobe",
-                    "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    "-v",
+                    "quiet",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
                     str(video_path),
                 ],
                 capture_output=True,
@@ -195,14 +198,20 @@ class VideoProcessor:
         if hwaccel:
             cmd.extend(["-hwaccel", hwaccel])
 
-        cmd.extend([
-            "-i", str(video_path),
-            "-vf", f"fps={self.fps}",
-            "-q:v", str(self.jpeg_quality),
-            "-threads", "0",
-            "-stats",
-            str(output_dir / "frame_%04d.jpg"),
-        ])
+        cmd.extend(
+            [
+                "-i",
+                str(video_path),
+                "-vf",
+                f"fps={self.fps}",
+                "-q:v",
+                str(self.jpeg_quality),
+                "-threads",
+                "0",
+                "-stats",
+                str(output_dir / "frame_%04d.jpg"),
+            ]
+        )
 
         # Run with progress tracking
         pbar = tqdm(

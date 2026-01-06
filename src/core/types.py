@@ -14,6 +14,7 @@ class PointCloud:
     All models must output at least points. Colors, confidence, and normals
     are optional depending on the model's capabilities.
     """
+
     points: np.ndarray  # (N, 3) XYZ coordinates
     colors: Optional[np.ndarray] = None  # (N, 3) RGB values 0-255
 
@@ -97,26 +98,29 @@ class PointCloud:
             vertex_data = np.zeros(
                 len(self.points),
                 dtype=[
-                    ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'),
-                ]
+                    ("x", "f4"),
+                    ("y", "f4"),
+                    ("z", "f4"),
+                    ("red", "u1"),
+                    ("green", "u1"),
+                    ("blue", "u1"),
+                ],
             )
-            vertex_data['x'] = self.points[:, 0]
-            vertex_data['y'] = self.points[:, 1]
-            vertex_data['z'] = self.points[:, 2]
-            vertex_data['red'] = self.colors[:, 0].astype(np.uint8)
-            vertex_data['green'] = self.colors[:, 1].astype(np.uint8)
-            vertex_data['blue'] = self.colors[:, 2].astype(np.uint8)
+            vertex_data["x"] = self.points[:, 0]
+            vertex_data["y"] = self.points[:, 1]
+            vertex_data["z"] = self.points[:, 2]
+            vertex_data["red"] = self.colors[:, 0].astype(np.uint8)
+            vertex_data["green"] = self.colors[:, 1].astype(np.uint8)
+            vertex_data["blue"] = self.colors[:, 2].astype(np.uint8)
         else:
             vertex_data = np.zeros(
-                len(self.points),
-                dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+                len(self.points), dtype=[("x", "f4"), ("y", "f4"), ("z", "f4")]
             )
-            vertex_data['x'] = self.points[:, 0]
-            vertex_data['y'] = self.points[:, 1]
-            vertex_data['z'] = self.points[:, 2]
+            vertex_data["x"] = self.points[:, 0]
+            vertex_data["y"] = self.points[:, 1]
+            vertex_data["z"] = self.points[:, 2]
 
-        vertex_element = PlyElement.describe(vertex_data, 'vertex')
+        vertex_element = PlyElement.describe(vertex_data, "vertex")
         ply_data = PlyData([vertex_element])
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,18 +132,14 @@ class PointCloud:
         from plyfile import PlyData
 
         ply_data = PlyData.read(str(path))
-        vertex = ply_data['vertex']
+        vertex = ply_data["vertex"]
 
-        points = np.column_stack([
-            vertex['x'], vertex['y'], vertex['z']
-        ])
+        points = np.column_stack([vertex["x"], vertex["y"], vertex["z"]])
 
         # Try to load colors
         colors = None
-        if 'red' in vertex.data.dtype.names:
-            colors = np.column_stack([
-                vertex['red'], vertex['green'], vertex['blue']
-            ])
+        if "red" in vertex.data.dtype.names:
+            colors = np.column_stack([vertex["red"], vertex["green"], vertex["blue"]])
 
         return cls(points=points, colors=colors)
 
@@ -152,6 +152,7 @@ class CameraPoses:
     Poses are 4x4 transformation matrices (world-to-camera or camera-to-world,
     depending on the model - check model documentation).
     """
+
     poses: np.ndarray  # (M, 4, 4) transformation matrices
     timestamps: Optional[np.ndarray] = None  # (M,) timestamps in seconds
     intrinsics: Optional[np.ndarray] = None  # (3, 3) or (M, 3, 3) camera intrinsics
@@ -161,7 +162,9 @@ class CameraPoses:
         """Validate pose data."""
         if self.poses.ndim != 3 or self.poses.shape[1:] != (4, 4):
             raise ValueError(f"Poses must be (M, 4, 4), got {self.poses.shape}")
-        if self.frame_indices is not None and len(self.frame_indices) != len(self.poses):
+        if self.frame_indices is not None and len(self.frame_indices) != len(
+            self.poses
+        ):
             raise ValueError("frame_indices length must match pose count")
 
     def __len__(self) -> int:
@@ -190,6 +193,7 @@ class ReconstructionResult:
     Every model must return at least a PointCloud. Poses and other
     metadata are optional depending on the model's capabilities.
     """
+
     pointcloud: PointCloud
     poses: Optional[CameraPoses] = None
     metadata: dict = field(default_factory=dict)  # Model-specific info
@@ -204,6 +208,7 @@ class GPSTrack:
 
     Typically extracted from GoPro or phone video metadata.
     """
+
     latitudes: np.ndarray  # (N,) degrees
     longitudes: np.ndarray  # (N,) degrees
     altitudes: Optional[np.ndarray] = None  # (N,) meters
@@ -296,6 +301,7 @@ class IMUData:
     Contains accelerometer, gyroscope, and optionally gravity vectors
     and camera orientations.
     """
+
     accelerometer: np.ndarray  # (N, 3) m/s^2
     gyroscope: np.ndarray  # (N, 3) rad/s
     timestamps: np.ndarray  # (N,) seconds from video start
@@ -347,6 +353,7 @@ class VideoInput:
 
     Contains the path to extracted frames and optional telemetry data.
     """
+
     video_path: Path  # Path to the original video file
     image_dir: Path  # Directory containing extracted frames
     fps: float  # Frame extraction rate

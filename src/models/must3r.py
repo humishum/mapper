@@ -64,7 +64,7 @@ class MASt3RModel(BaseModel):
             "use_chunking": False,
             "window_size": 500,
             "window_overlap": 20,
-            "confidence_thresholds": [5.0], # [5.0, 2.0, 1.5, 1.05],
+            "confidence_thresholds": [5.0],  # [5.0, 2.0, 1.5, 1.05],
             "num_mem_imgs": 50,
             "subsample": 2,
             "min_conf_thr": 1.05,
@@ -404,11 +404,14 @@ class MASt3RModel(BaseModel):
                         fx = fy = float(focals[0])
                     else:
                         fx = fy = float(focals.mean())
-                    intrinsics = np.array([
-                        [fx, 0, cx],
-                        [0, fy, cy],
-                        [0, 0, 1],
-                    ], dtype=np.float32)
+                    intrinsics = np.array(
+                        [
+                            [fx, 0, cx],
+                            [0, fy, cy],
+                            [0, 0, 1],
+                        ],
+                        dtype=np.float32,
+                    )
 
                 return CameraPoses(
                     poses=poses.astype(np.float32),

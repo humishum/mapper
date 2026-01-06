@@ -196,7 +196,7 @@ class MetricsCalculator:
         errors = np.linalg.norm(aligned - gps_enu, axis=1)
 
         return {
-            "gps_rmse_m": float(np.sqrt(np.mean(errors ** 2))),
+            "gps_rmse_m": float(np.sqrt(np.mean(errors**2))),
             "gps_max_error_m": float(np.max(errors)),
             "gps_mean_error_m": float(np.mean(errors)),
             "gps_median_error_m": float(np.median(errors)),

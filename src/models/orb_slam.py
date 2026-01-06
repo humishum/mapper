@@ -174,7 +174,9 @@ class ORBSLAMModel(BaseModel):
 
             # Estimate Essential matrix
             E, mask = cv2.findEssentialMat(
-                pts1, pts2, K,
+                pts1,
+                pts2,
+                K,
                 method=cv2.RANSAC,
                 prob=0.999,
                 threshold=1.0,
@@ -221,8 +223,7 @@ class ORBSLAMModel(BaseModel):
 
             if len(inlier_pts1) >= 8:
                 points_3d, valid_indices = self._triangulate_points(
-                    inlier_pts1, inlier_pts2,
-                    poses[-2], current_pose, K
+                    inlier_pts1, inlier_pts2, poses[-2], current_pose, K
                 )
 
                 if len(points_3d) > 0:
@@ -261,15 +262,15 @@ class ORBSLAMModel(BaseModel):
         if not np.isfinite(poses_array).all():
             logger.warning("ORB-SLAM: Non-finite pose values detected")
 
-        logger.info(f"ORB-SLAM: Generated {len(points_array)} points, {len(poses_array)} poses")
+        logger.info(
+            f"ORB-SLAM: Generated {len(points_array)} points, {len(poses_array)} poses"
+        )
 
         # Optional: Use IMU for scale recovery
         scale = 1.0
         is_metric = False
         if self.use_imu and video_input.imu_data is not None:
-            scale = self._estimate_scale_from_imu(
-                poses_array, video_input.imu_data
-            )
+            scale = self._estimate_scale_from_imu(poses_array, video_input.imu_data)
             points_array *= scale
             is_metric = True
             logger.info(f"ORB-SLAM: Applied IMU scale factor: {scale:.4f}")
@@ -277,7 +278,7 @@ class ORBSLAMModel(BaseModel):
         # Get timestamps
         timestamps = video_input.get_frame_timestamps()
         if len(timestamps) > len(poses_array):
-            timestamps = timestamps[:len(poses_array)]
+            timestamps = timestamps[: len(poses_array)]
 
         return ReconstructionResult(
             pointcloud=PointCloud(
@@ -309,11 +310,14 @@ class ORBSLAMModel(BaseModel):
         cx = self.cx or w / 2
         cy = self.cy or h / 2
 
-        return np.array([
-            [fx, 0, cx],
-            [0, fy, cy],
-            [0, 0, 1],
-        ], dtype=np.float64)
+        return np.array(
+            [
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1],
+            ],
+            dtype=np.float64,
+        )
 
     def _match_features(
         self,
@@ -351,10 +355,7 @@ class ORBSLAMModel(BaseModel):
         P2 = K @ pose2[:3, :]
 
         # Triangulate
-        points_4d = cv2.triangulatePoints(
-            P1, P2,
-            pts1.T, pts2.T
-        )
+        points_4d = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
 
         # Convert to 3D
         w = points_4d[3, :]

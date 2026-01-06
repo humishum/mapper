@@ -11,12 +11,12 @@ def is_already_processed(video_file: Path, output_folder: Path) -> bool:
     video_name = video_file.name.split(".")[0]
     video_output_dir = output_folder / video_name
     metadata_path = video_output_dir / "metadata.json"
-    
+
     if not metadata_path.exists():
         return False
-    
+
     try:
-        with open(metadata_path, 'r') as f:
+        with open(metadata_path, "r") as f:
             metadata = json.load(f)
         return metadata.get("completed", False)
     except (json.JSONDecodeError, IOError):
@@ -30,8 +30,12 @@ if __name__ == "__main__":
     parser.add_argument("--weights_path", type=str, required=True)
     parser.add_argument("--retrieval_path", type=str, required=True)
     parser.add_argument("--image_size", type=int, required=True)
-    parser.add_argument("--force", action="store_true", help="Force reprocessing of already processed videos")
-    
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force reprocessing of already processed videos",
+    )
+
     args = parser.parse_args()
 
     top_level_folder = Path(args.folder)

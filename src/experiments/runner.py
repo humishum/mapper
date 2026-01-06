@@ -18,8 +18,9 @@ from .metrics import MetricsCalculator
 from .utils import get_git_info
 
 
-DEFAULT_FRAME_RATE = 10 
+DEFAULT_FRAME_RATE = 10
 DEFAULT_VIDEO_EXTENSIONS = [".MP4", ".MOV", ".mp4", ".mov"]
+
 
 @dataclass
 class ExperimentConfig:
@@ -41,7 +42,9 @@ class ExperimentConfig:
     alignment_config: dict = field(default_factory=dict)
 
     # Video filtering (optional)
-    video_extensions: List[str] = field(default_factory=lambda: DEFAULT_VIDEO_EXTENSIONS)
+    video_extensions: List[str] = field(
+        default_factory=lambda: DEFAULT_VIDEO_EXTENSIONS
+    )
 
     def __post_init__(self):
         self.input_folder = Path(self.input_folder)
@@ -80,7 +83,7 @@ class ExperimentRunner:
         self.window_aligner = WindowAligner(config=self.config.alignment_config)
         self.metrics_calculator = MetricsCalculator()
 
-        # lazy load model 
+        # lazy load model
         self._model = None
 
         # Setup experiment directory
@@ -88,10 +91,10 @@ class ExperimentRunner:
 
         # Setup logger with custom handlers to avoid duplication with root logger
         self.logger = logging.getLogger(__name__)
-        self.logger.propagate = False 
+        self.logger.propagate = False
         self.logger.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-        file_handler = logging.FileHandler(self.exp_dir / "experiment.log", mode='a')
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        file_handler = logging.FileHandler(self.exp_dir / "experiment.log", mode="a")
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(formatter)
         stream_handler = logging.StreamHandler(sys.stdout)
@@ -163,11 +166,13 @@ class ExperimentRunner:
                 self.logger.info(f"  Success: {result.get('point_count', 0)} points")
             except Exception as e:
                 self.logger.error(f"  Error: {e}")
-                results.append({
-                    "video": video_path.name,
-                    "error": str(e),
-                    "success": False,
-                })
+                results.append(
+                    {
+                        "video": video_path.name,
+                        "error": str(e),
+                        "success": False,
+                    }
+                )
 
         # Save results
         self._save_results(self.exp_dir, results)
@@ -186,7 +191,9 @@ class ExperimentRunner:
         self._model = model_cls(self.config.model_config)
         self._model.load()
 
-        self.logger.info(f"Model loaded. Capabilities: {self._model.get_capabilities()}")
+        self.logger.info(
+            f"Model loaded. Capabilities: {self._model.get_capabilities()}"
+        )
 
     def _find_videos(self) -> List[Path]:
         """Find all video files in input folder."""
@@ -268,10 +275,18 @@ class ExperimentRunner:
         self.logger.info("  Extracting telemetry...")
         gps_track, imu_data = self.telemetry_extractor.extract_gps_imu(video_path)
 
-        self.logger.info(f"  GPS: {len(gps_track)} points" if gps_track is not None else "  GPS: not available")
-        self.logger.info(f"  IMU: {len(imu_data)} samples" if imu_data is not None else "  IMU: not available")
+        self.logger.info(
+            f"  GPS: {len(gps_track)} points"
+            if gps_track is not None
+            else "  GPS: not available"
+        )
+        self.logger.info(
+            f"  IMU: {len(imu_data)} samples"
+            if imu_data is not None
+            else "  IMU: not available"
+        )
 
-        #Create video input
+        # Create video input
         video_input = VideoInput(
             video_path=video_path,
             image_dir=image_dir,
@@ -426,7 +441,9 @@ class ExperimentRunner:
         if failed:
             self.logger.info("\nFailed videos:")
             for r in failed:
-                self.logger.info(f"  - {r.get('video')}: {r.get('error', 'Unknown error')}")
+                self.logger.info(
+                    f"  - {r.get('video')}: {r.get('error', 'Unknown error')}"
+                )
 
         self.logger.info("=" * 50)
 
@@ -437,13 +454,15 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run reconstruction experiment")
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=Path,
         required=True,
         help="Path to experiment config YAML",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable verbose logging",
     )
