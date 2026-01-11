@@ -39,6 +39,7 @@ class ExperimentConfig:
     align_to_gps: bool = True
     force_reprocess: bool = False
     frame_cache_dir: Optional[Path] = None
+    save_window_results: bool = False
     alignment_config: dict = field(default_factory=dict)
 
     # Video filtering (optional)
@@ -127,6 +128,7 @@ class ExperimentRunner:
             align_to_gps=raw.get("align_to_gps", True),
             force_reprocess=raw.get("force_reprocess", False),
             frame_cache_dir=raw.get("frame_cache_dir"),
+            save_window_results=raw.get("save_window_results", False),
             video_extensions=raw.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
             alignment_config=raw.get("alignment_config", {}),
         )
@@ -196,13 +198,13 @@ class ExperimentRunner:
         )
 
     def _find_videos(self) -> List[Path]:
-        """Find all video files in input folder."""
+        """Find all video files in input folder, return sorted by file size(smallest first)"""
         videos = []
 
         for ext in self.config.video_extensions:
             videos.extend(self.config.input_folder.glob(f"*{ext}"))
 
-        return sorted(videos)
+        return sorted(videos, key=lambda p: p.stat().st_size)
 
     def _setup_experiment_dir(self) -> Path:
         """Create experiment output directory."""
@@ -228,6 +230,7 @@ class ExperimentRunner:
                 if self.config.frame_cache_dir is not None
                 else None
             ),
+            "save_window_results": self.config.save_window_results,
             "alignment_config": self.config.alignment_config,
             "timestamp": timestamp,
             "git_commit": git_commit,
@@ -304,6 +307,11 @@ class ExperimentRunner:
         # Step 4: Run reconstruction
         self.logger.info("  Running reconstruction...")
         result = self._model.reconstruct(video_input, output_dir)
+
+        # Save raw windowed outputs (optional) before alignment/merge.
+        if result.chunks and self.config.save_window_results:
+            self.logger.info("  Saving %d window results...", len(result.chunks))
+            self._save_window_results(result.chunks, output_dir)
 
         # Step 4b: Align and merge windowed outputs (if chunking was used)
         if result.chunks:
@@ -407,6 +415,42 @@ class ExperimentRunner:
             json.dump(results, f, indent=2, default=str)
 
         self.logger.info(f"Results saved to: {results_path}")
+
+    def _save_window_results(
+        self, chunks: List["ReconstructionResult"], output_dir: Path
+    ) -> None:
+        """Persist per-window reconstructions for post-processing."""
+        windows_dir = output_dir / "windows"
+        windows_dir.mkdir(parents=True, exist_ok=True)
+
+        for idx, chunk in enumerate(chunks):
+            window_id = chunk.window_metadata.get("window_id", idx)
+            window_dir = windows_dir / f"window_{int(window_id):03d}"
+            window_dir.mkdir(parents=True, exist_ok=True)
+
+            pointcloud_path = window_dir / "pointcloud.ply"
+            chunk.pointcloud.save_ply(pointcloud_path)
+
+            if chunk.poses is not None:
+                poses_path = window_dir / "poses.npz"
+                np.savez(
+                    poses_path,
+                    poses=chunk.poses.poses,
+                    timestamps=chunk.poses.timestamps,
+                    intrinsics=chunk.poses.intrinsics,
+                    frame_indices=chunk.poses.frame_indices,
+                )
+
+            metadata_path = window_dir / "metadata.json"
+            metadata = {
+                "window_metadata": chunk.window_metadata,
+                "model_metadata": chunk.metadata,
+                "point_count": len(chunk.pointcloud),
+                "is_metric": chunk.pointcloud.is_metric,
+                "has_poses": chunk.poses is not None,
+            }
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
 
     def _print_summary(self, results: List[dict]) -> None:
         """Print experiment summary."""

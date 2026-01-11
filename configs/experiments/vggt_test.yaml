@@ -11,22 +11,23 @@ model_config:
   model_name: "facebook/VGGT-1B"
   weights_path: null  # Optional: local model.pt if you downloaded manually
   use_chunking: true
-  window_size: 3
-  window_overlap: 1
+  window_size: 10
+  window_overlap: 2
   device: "cuda"
   image_size: 518
-  preprocess_mode: "square"  # square | pad | crop
+  preprocess_mode: "crop"  # square | pad | crop
   use_point_map: false
-  min_confidence: 5.0
+  min_confidence: 1.0
   max_points: 50000
   sample_seed: 0
 
-input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
-output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+input_folder: "/workspace/data/videos"
+output_folder: "/workspace/output/vggt_gopro"
 
 fps: 10
 align_to_gps: true
 force_reprocess: false
+save_window_results: false
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
 
 alignment_config:
@@ -38,4 +39,7 @@ alignment_config:
   icp_max_corr_dist: 0.2
   icp_init: "none"
   gps_scale_min_std_dev_m: 0.5
-  save_alignment_debug: false
+  save_alignment_debug: true
+
+video_extensions:
+  - ".MP4"

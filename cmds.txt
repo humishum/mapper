@@ -5,3 +5,5 @@ uv run src/process_folder.py --folder <> --output_folder <> --weights_path /work
 uv run python -m src.experiments.runner --config configs/experiments/kings_canyon_must3r.yaml
 
 uv run python -m src.experiments.runner --config configs/experiments/kings_canyon_orb_slam.yaml
+
+uv run python -m src.experiments.runner --config configs/experiments/vggt_test.yaml

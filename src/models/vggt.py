@@ -55,7 +55,7 @@ class VGGTModel(BaseModel):
         self.preprocess_mode = self.config.get("preprocess_mode", "square")
         self.use_point_map = self.config.get("use_point_map", False)
         self.min_confidence = self.config.get("min_confidence", 5.0)
-        self.max_points = self.config.get("max_points", 500000)
+        self.max_points = self.config.get("max_points", None)
         self.sample_seed = self.config.get("sample_seed")
 
     @classmethod
@@ -121,8 +121,6 @@ class VGGTModel(BaseModel):
     ) -> ReconstructionResult:
         """
         Run VGGT reconstruction.
-
-        TODO: Implement actual VGGT inference.
 
         Expected workflow:
         1. Load images from video_input.image_dir
@@ -263,7 +261,7 @@ class VGGTModel(BaseModel):
             images, _ = load_and_preprocess_images_square(
                 image_paths, target_size=self.image_size
             )
-        elif self.preprocess_mode in {"pad", "crop"}:
+        elif self.preprocess_mode =="pad":
             if self.image_size != 518:
                 logger.warning(
                     "preprocess_mode %s uses fixed size 518; image_size=%s ignored",
@@ -271,6 +269,8 @@ class VGGTModel(BaseModel):
                     self.image_size,
                 )
             images = load_and_preprocess_images(image_paths, mode=self.preprocess_mode)
+        elif self.preprocess_mode == "crop":
+            images = load_and_preprocess_images(image_paths,  mode="crop")
         else:
             raise ValueError(
                 f"Invalid preprocess_mode '{self.preprocess_mode}'. "
@@ -335,6 +335,8 @@ class VGGTModel(BaseModel):
 
         colors = self._extract_colors(images)
 
+        logger.info(f"VGGT: {len(points)} points before confidence filtering")
+
         if self.min_confidence is not None:
             mask = confidence >= self.min_confidence
             points = points[mask]
@@ -342,6 +344,7 @@ class VGGTModel(BaseModel):
             if colors is not None:
                 colors = colors[mask]
 
+        logger.info(f"VGGT: {len(points)} points after confidence filtering")
         if self.max_points is not None and len(points) > self.max_points:
             rng = np.random.default_rng(self.sample_seed)
             keep_idx = rng.choice(len(points), size=self.max_points, replace=False)
@@ -349,6 +352,8 @@ class VGGTModel(BaseModel):
             confidence = confidence[keep_idx]
             if colors is not None:
                 colors = colors[keep_idx]
+        logger.info(f"VGGT: {len(points)} points after max points filtering")
+
 
         if len(points) == 0:
             logger.warning("VGGT produced no points after filtering")
