@@ -8,6 +8,11 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   overflow: hidden;
   z-index: 1000;
+  transition: width 0.3s ease;
+}
+
+.render-controls.collapsed {
+  width: 56px;
 }
 
 .controls-header {
@@ -111,5 +116,59 @@
 
 .control-info li {
   margin-bottom: 4px;
+}
+
+/* Hamburger menu button */
+.hamburger-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.2s;
+  position: relative;
+  z-index: 10;
+}
+
+.hamburger-button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.hamburger-icon {
+  width: 24px;
+  height: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hamburger-icon span {
+  display: block;
+  height: 3px;
+  width: 100%;
+  background: #333;
+  border-radius: 2px;
+  transition: all 0.3s;
+}
+
+.render-controls.collapsed .controls-header {
+  padding: 12px;
+  border-bottom: none;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .render-controls {
+    top: 10px;
+    right: 10px;
+    width: 240px;
+  }
+
+  .render-controls.collapsed {
+    width: 48px;
+  }
 }
 

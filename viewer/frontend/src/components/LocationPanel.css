@@ -11,6 +11,12 @@
   flex-direction: column;
   overflow: hidden;
   z-index: 1000;
+  transition: width 0.3s ease, max-height 0.3s ease;
+}
+
+.location-panel.collapsed {
+  width: 56px;
+  max-height: 56px;
 }
 
 .panel-header {
@@ -124,5 +130,61 @@
 
 .location-list::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+/* Hamburger menu button */
+.hamburger-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.2s;
+  position: relative;
+  z-index: 10;
+}
+
+.hamburger-button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.hamburger-icon {
+  width: 24px;
+  height: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hamburger-icon span {
+  display: block;
+  height: 3px;
+  width: 100%;
+  background: #333;
+  border-radius: 2px;
+  transition: all 0.3s;
+}
+
+.location-panel.collapsed .panel-header {
+  padding: 12px;
+  border-bottom: none;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .location-panel {
+    top: 10px;
+    left: 10px;
+    width: 280px;
+    max-height: calc(100vh - 80px);
+  }
+
+  .location-panel.collapsed {
+    width: 48px;
+    max-height: 48px;
+  }
 }
 

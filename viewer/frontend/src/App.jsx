@@ -24,6 +24,8 @@ function App() {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [pointSize, setPointSize] = useState(2);
   const [pointOpacity, setPointOpacity] = useState(1.0);
+  const [locationPanelCollapsed, setLocationPanelCollapsed] = useState(false);
+  const [renderControlsCollapsed, setRenderControlsCollapsed] = useState(false);
 
   // Load locations on mount
   useEffect(() => {
@@ -173,14 +175,18 @@ function App() {
         onUnloadLocation={handleUnloadLocation}
         onFlyToLocation={handleFlyToLocation}
         loading={loading}
+        collapsed={locationPanelCollapsed}
+        onToggleCollapse={() => setLocationPanelCollapsed(!locationPanelCollapsed)}
       />
-      
+
       <RenderControls
         pointSize={pointSize}
         onPointSizeChange={setPointSize}
         pointOpacity={pointOpacity}
         onPointOpacityChange={setPointOpacity}
         onViewPreset={handleViewPreset}
+        collapsed={renderControlsCollapsed}
+        onToggleCollapse={() => setRenderControlsCollapsed(!renderControlsCollapsed)}
       />
 
       {loading && (

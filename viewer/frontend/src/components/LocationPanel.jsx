@@ -10,22 +10,40 @@ export default function LocationPanel({
   onLoadLocation,
   onUnloadLocation,
   onFlyToLocation,
-  loading = false
+  loading = false,
+  collapsed = false,
+  onToggleCollapse
 }) {
   const isLoaded = (locationName) => {
     return loadedPointclouds.some(pc => pc.location === locationName);
   };
 
   return (
-    <div className="location-panel">
+    <div className={`location-panel ${collapsed ? 'collapsed' : ''}`}>
       <div className="panel-header">
-        <h2>Locations ({locations.length})</h2>
-        <p className="panel-subtitle">
-          {loadedPointclouds.length} loaded
-        </p>
+        <button
+          className="hamburger-button"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand locations panel" : "Collapse locations panel"}
+        >
+          <div className="hamburger-icon">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </button>
+        {!collapsed && (
+          <>
+            <h2>Locations ({locations.length})</h2>
+            <p className="panel-subtitle">
+              {loadedPointclouds.length} loaded
+            </p>
+          </>
+        )}
       </div>
 
-      <div className="location-list">
+      {!collapsed && (
+        <div className="location-list">
         {locations.map(location => {
           const loaded = isLoaded(location.name);
           
@@ -71,7 +89,8 @@ export default function LocationPanel({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

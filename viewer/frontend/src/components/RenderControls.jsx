@@ -9,7 +9,9 @@ export default function RenderControls({
   onPointSizeChange,
   pointOpacity = 1.0,
   onPointOpacityChange,
-  onViewPreset
+  onViewPreset,
+  collapsed = false,
+  onToggleCollapse
 }) {
   const presets = [
     { name: 'Overview', zoom: 8, pitch: 60, bearing: 0 },
@@ -18,12 +20,25 @@ export default function RenderControls({
   ];
 
   return (
-    <div className="render-controls">
+    <div className={`render-controls ${collapsed ? 'collapsed' : ''}`}>
       <div className="controls-header">
-        <h3>Render Controls</h3>
+        <button
+          className="hamburger-button"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand render controls" : "Collapse render controls"}
+        >
+          <div className="hamburger-icon">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </button>
+        {!collapsed && <h3>Render Controls</h3>}
       </div>
 
-      <div className="control-group">
+      {!collapsed && (
+        <>
+          <div className="control-group">
         <label htmlFor="point-size">
           Point Size: {pointSize}px
         </label>
@@ -75,7 +90,9 @@ export default function RenderControls({
           <li>Scroll: Zoom</li>
           <li>Right drag: Pan</li>
         </ul>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
