@@ -41,5 +41,7 @@ alignment_config:
   gps_scale_min_std_dev_m: 0.5
   save_alignment_debug: true
 
+# use for just gopro stuff
+
 video_extensions:
   - ".MP4"

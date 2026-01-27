@@ -26,12 +26,13 @@ model_config:
   num_mem_imgs: 30  # Reduced for low VRAM
   subsample: 2
 
-input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
-output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+input_folder: "/home/ape/Documents/MapperGoProVids/680_work"
+output_folder: "/home/ape/mapper_output/must3r_012626"
 
 fps: 10
 align_to_gps: true
 force_reprocess: false
+save_window_results: true
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
 
 alignment_config:
@@ -43,4 +44,8 @@ alignment_config:
   icp_max_corr_dist: 0.2
   icp_init: "none"
   gps_scale_min_std_dev_m: 0.5
-  save_alignment_debug: false
+  save_alignment_debug: true
+
+# use for just gopro stuff
+video_extensions:
+  - ".MP4"
