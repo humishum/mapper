@@ -1,0 +1,10 @@
+console.log('start');
+import { chromium } from 'playwright';
+console.log('imported');
+const b = await chromium.launch({ headless:true, args:['--no-sandbox'] });
+console.log('launched', b.version());
+const p = await b.newPage();
+await p.goto('data:text/html,<h1>hi</h1>');
+console.log('title:', await p.title(), await p.content());
+await b.close();
+console.log('done');

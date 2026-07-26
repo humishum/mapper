@@ -52,3 +52,6 @@ dependencies = [
 
 [tool.uv.sources]
 gopropy = { path = "../gopro-py", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

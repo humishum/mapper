@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="data:," />
+        <title>Phase 0 - Giro3D COPC spike</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                --bg: #101317;
+                --panel: #181c22e6;
+                --line: #2a3038;
+                --text: #e6e9ee;
+                --muted: #9aa4b2;
+                --accent: #6ea8fe;
+                --warn: #f0b429;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                background: var(--bg);
+                color: var(--text);
+                font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            }
+            #view {
+                position: absolute;
+                inset: 0;
+            }
+            .panel {
+                position: absolute;
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: 8px;
+                padding: 10px 12px;
+                backdrop-filter: blur(6px);
+            }
+            #hud {
+                top: 12px;
+                left: 12px;
+                min-width: 268px;
+            }
+            #controls {
+                top: 12px;
+                right: 12px;
+                width: 232px;
+            }
+            h2 {
+                margin: 0 0 8px;
+                font-size: 12px;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: var(--muted);
+                font-weight: 600;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            td {
+                padding: 1px 0;
+                font-variant-numeric: tabular-nums;
+            }
+            td:first-child {
+                color: var(--muted);
+                padding-right: 10px;
+            }
+            td:last-child {
+                text-align: right;
+            }
+            label {
+                display: block;
+                color: var(--muted);
+                margin: 8px 0 2px;
+            }
+            select,
+            input[type='range'],
+            button {
+                width: 100%;
+                background: #11151a;
+                color: var(--text);
+                border: 1px solid var(--line);
+                border-radius: 6px;
+                padding: 4px 6px;
+                font: inherit;
+            }
+            button {
+                cursor: pointer;
+                margin-top: 8px;
+            }
+            button:hover {
+                border-color: var(--accent);
+            }
+            #status {
+                position: absolute;
+                bottom: 12px;
+                left: 12px;
+                right: 12px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                pointer-events: none;
+            }
+            #frame-note {
+                color: var(--warn);
+                border-color: #533c0a;
+                background: #241c07e6;
+                pointer-events: auto;
+            }
+            #progress {
+                flex: 1;
+                height: 3px;
+                background: #22272e;
+                border-radius: 2px;
+                overflow: hidden;
+            }
+            #progress > div {
+                height: 100%;
+                width: 0;
+                background: var(--accent);
+                transition: width 0.15s linear;
+            }
+            code {
+                color: var(--accent);
+            }
+        </style>
+    </head>
+    <body>
+        <div id="view"></div>
+
+        <div class="panel" id="hud">
+            <h2>Perf HUD</h2>
+            <table>
+                <tbody>
+                    <tr><td>artifact</td><td id="m-artifact">-</td></tr>
+                    <tr><td>total points</td><td id="m-total">-</td></tr>
+                    <tr><td>displayed</td><td id="m-displayed">-</td></tr>
+                    <tr><td>frame (last / p95)</td><td id="m-frame">-</td></tr>
+                    <tr><td>draw calls</td><td id="m-calls">-</td></tr>
+                    <tr><td>geometry cache</td><td id="m-mem">-</td></tr>
+                    <tr><td>loading</td><td id="m-loading">-</td></tr>
+                    <tr><td>time to first geom</td><td id="m-first">-</td></tr>
+                    <tr><td>time to idle</td><td id="m-idle">-</td></tr>
+                    <tr><td>CRS</td><td id="m-crs">-</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="panel" id="controls">
+            <h2>Scene</h2>
+            <label for="attr">colour by</label>
+            <select id="attr"></select>
+            <label for="budget">point budget: <span id="budget-val"></span></label>
+            <input type="range" id="budget" min="250000" max="12000000" step="250000" />
+            <label for="sse">subdivision threshold: <span id="sse-val"></span></label>
+            <input type="range" id="sse" min="0.5" max="4" step="0.1" />
+            <label for="size">point size: <span id="size-val"></span></label>
+            <input type="range" id="size" min="0" max="6" step="1" />
+            <button id="run-path">Run camera path (orbit)</button>
+            <button id="copy-json">Copy measurements JSON</button>
+        </div>
+
+        <div id="status">
+            <div class="panel" id="frame-note" hidden></div>
+            <div id="progress"><div></div></div>
+        </div>
+
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>

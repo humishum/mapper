@@ -1,0 +1,24 @@
+{
+  "name": "phase0-giro3d-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5180",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5180",
+    "bench:data": "node bench-data.mjs",
+    "bench:browser": "node bench.mjs"
+  },
+  "dependencies": {
+    "@giro3d/giro3d": "2.0.3",
+    "ol": "^10.8.0",
+    "proj4": "^2.19.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "playwright": "^1.56.0",
+    "vite": "^7.1.0"
+  }
+}
