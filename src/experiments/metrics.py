@@ -1,6 +1,6 @@
 """Metrics calculation for reconstruction evaluation."""
 
-from typing import Optional
+from typing import Optional, Sequence
 import logging
 import numpy as np
 
@@ -54,6 +54,85 @@ class MetricsCalculator:
         if poses is not None and gps_track is not None:
             metrics.update(self._compute_gps_metrics(poses, gps_track))
 
+        return metrics
+
+    def compute_chunks(
+        self,
+        pointclouds: Sequence[PointCloud],
+        poses: Optional[CameraPoses],
+        gps_track: Optional[GPSTrack],
+    ) -> dict:
+        """Compute the canonical metrics without concatenating source units."""
+        if not pointclouds:
+            raise ValueError("at least one point cloud is required")
+
+        point_count = sum(len(pointcloud) for pointcloud in pointclouds)
+        nonempty = [pointcloud for pointcloud in pointclouds if len(pointcloud)]
+        metrics = {
+            "point_count": point_count,
+            "is_metric": all(pointcloud.is_metric for pointcloud in pointclouds),
+            "scale_factor": pointclouds[0].scale,
+        }
+
+        if nonempty:
+            bounds_min = np.minimum.reduce(
+                [pointcloud.points.min(axis=0) for pointcloud in nonempty]
+            )
+            bounds_max = np.maximum.reduce(
+                [pointcloud.points.max(axis=0) for pointcloud in nonempty]
+            )
+            dimensions = bounds_max - bounds_min
+            volume = float(np.prod(dimensions))
+            metrics.update(
+                {
+                    "point_density": point_count / volume if volume > 0 else 0.0,
+                    "bounding_box_volume_m3": volume,
+                    "bounding_box_x_m": float(dimensions[0]),
+                    "bounding_box_y_m": float(dimensions[1]),
+                    "bounding_box_z_m": float(dimensions[2]),
+                }
+            )
+            confidence = [
+                np.asarray(pointcloud.confidence, dtype=np.float64)
+                for pointcloud in nonempty
+                if pointcloud.confidence is not None
+            ]
+            if len(confidence) == len(nonempty):
+                confidence_count = sum(len(values) for values in confidence)
+                confidence_sum = sum(float(values.sum()) for values in confidence)
+                confidence_sum_squares = sum(
+                    float(np.square(values).sum()) for values in confidence
+                )
+                confidence_mean = confidence_sum / confidence_count
+                confidence_variance = max(
+                    confidence_sum_squares / confidence_count
+                    - confidence_mean * confidence_mean,
+                    0.0,
+                )
+                metrics.update(
+                    {
+                        "confidence_mean": confidence_mean,
+                        "confidence_std": float(np.sqrt(confidence_variance)),
+                        "confidence_min": min(
+                            float(values.min()) for values in confidence
+                        ),
+                        "confidence_max": max(
+                            float(values.max()) for values in confidence
+                        ),
+                    }
+                )
+        else:
+            metrics.update(
+                {
+                    "point_density": 0.0,
+                    "bounding_box_volume_m3": 0.0,
+                }
+            )
+
+        if poses is not None:
+            metrics.update(self._compute_trajectory_metrics(poses))
+        if poses is not None and gps_track is not None:
+            metrics.update(self._compute_gps_metrics(poses, gps_track))
         return metrics
 
     def _compute_pointcloud_metrics(self, pointcloud: PointCloud) -> dict:

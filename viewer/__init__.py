@@ -1,0 +1,1 @@
+"""Mapper viewer application package."""

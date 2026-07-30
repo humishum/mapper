@@ -31,10 +31,16 @@ model_config:
   # cx: 960.0
   # cy: 540.0
 
-input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
-output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+input_folder: "data/input_kings_canyon"
+output_folder: "data/output_kings_canyon"
 
 fps: 10
 align_to_gps: true        # Recommended: ORB-SLAM needs GPS for metric scale
 force_reprocess: false
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+package_config:
+  copc_memory_limit: "4G"
+  voxel_size_m: 0.02
+  register_catalog: true
+  catalog_path: "catalog.sqlite3"

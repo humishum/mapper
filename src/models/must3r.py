@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Optional, List, Tuple
-import os
 import logging
 import numpy as np
 
@@ -48,8 +47,15 @@ class MASt3RModel(BaseModel):
         self.use_chunking = self.config.get("use_chunking", False)
         self.window_size = self.config.get("window_size", 500)
         self.window_overlap = self.config.get("window_overlap", 20)
-        self.confidence_thresholds = self.config.get(
-            "confidence_thresholds", [5.0, 2.0, 1.5, 1.05]
+        # Threshold families were previously exported as separate PLY files.  The
+        # canonical publisher keeps confidence as a point attribute, so inference
+        # now applies one minimum threshold and never round-trips through PLY.
+        legacy_thresholds = self.config.get("confidence_thresholds", [5.0])
+        self.min_confidence = float(
+            self.config.get(
+                "min_confidence",
+                legacy_thresholds[0] if legacy_thresholds else 1.05,
+            )
         )
         self.num_mem_imgs = self.config.get("num_mem_imgs", 50)
         self.subsample = self.config.get("subsample", 2)
@@ -64,7 +70,7 @@ class MASt3RModel(BaseModel):
             "use_chunking": False,
             "window_size": 500,
             "window_overlap": 20,
-            "confidence_thresholds": [5.0],  # [5.0, 2.0, 1.5, 1.05],
+            "min_confidence": 5.0,
             "num_mem_imgs": 50,
             "subsample": 2,
             "min_conf_thr": 1.05,
@@ -170,7 +176,7 @@ class MASt3RModel(BaseModel):
             metadata={
                 "model": "must3r",
                 "image_count": len(images),
-                "thresholds": self.confidence_thresholds,
+                "min_confidence": self.min_confidence,
                 "window_size": self.window_size,
                 "window_overlap": self.window_overlap,
                 "image_size": self.image_size,
@@ -198,7 +204,7 @@ class MASt3RModel(BaseModel):
         window_id: int,
     ) -> ReconstructionResult:
         """Run reconstruction on a single window of images."""
-        from must3r.demo.gradio import get_reconstructed_scene, get_3D_model_from_scene
+        from must3r.demo.gradio import get_reconstructed_scene
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -241,25 +247,10 @@ class MASt3RModel(BaseModel):
             overlap_percentile=85,
         )
 
-        # Save PLY files at different confidence thresholds
-        for thr in self.confidence_thresholds:
-            try:
-                logger.info(f"Generating PLY file with confidence threshold {thr}")
-                get_3D_model_from_scene(
-                    outdir=str(output_dir),
-                    verbose=True,
-                    scene=scene,
-                    min_conf_thr=thr,
-                    as_pointcloud=True,
-                    transparent_cams=False,
-                    cam_size=0.05,
-                    filename=f"scene_thr{thr}.ply",
-                )
-            except Exception as e:
-                logger.error(f"Error generating PLY at threshold {thr}: {e}")
-
-        # Extract point cloud from scene at highest threshold
-        pointcloud = self._extract_pointcloud(scene, output_dir)
+        # Extract directly from the scene so confidence survives publication.
+        # The old threshold-family PLY exports consumed substantial disk and then
+        # discarded confidence when they were loaded again.
+        pointcloud = self._extract_pointcloud(scene)
 
         # Extract camera poses from scene
         poses = self._extract_poses(scene, video_input, frame_indices=frame_indices)
@@ -279,66 +270,86 @@ class MASt3RModel(BaseModel):
             metadata={
                 "model": "must3r",
                 "image_count": len(images),
-                "thresholds": self.confidence_thresholds,
+                "min_confidence": self.min_confidence,
                 "window_size": self.window_size,
                 "image_size": self.image_size,
             },
             window_metadata=window_metadata,
         )
 
-    def _extract_pointcloud(self, scene, output_dir: Path) -> PointCloud:
-        """Extract PointCloud from MASt3R scene object."""
-        # Load the highest-threshold PLY we just saved
-        best_threshold = self.confidence_thresholds[0]
-        ply_path = output_dir / f"scene_thr{best_threshold}.ply"
+    def _extract_pointcloud(self, scene) -> PointCloud:
+        """Extract aligned points, RGB and confidence directly from a scene.
 
-        if ply_path.exists():
-            return PointCloud.from_ply(ply_path)
+        ``SceneState.x_out`` is the authoritative MUSt3R result.  Each entry
+        contains point and confidence maps in the same shape as the corresponding
+        image.  Keeping them together here avoids the lossy PLY interchange used
+        by the original experiment wrapper.
+        """
 
-        # Fallback: try to extract directly from scene
-        # MASt3R scene structure varies, so we handle multiple cases
-        try:
-            if hasattr(scene, "pts3d") and scene.pts3d is not None:
-                pts3d = scene.pts3d
-                if hasattr(pts3d, "cpu"):
-                    pts3d = pts3d.cpu().numpy()
+        if not hasattr(scene, "x_out") or not hasattr(scene, "imgs"):
+            raise ValueError("MUSt3R scene is missing x_out/imgs")
+        if len(scene.x_out) != len(scene.imgs):
+            raise ValueError("MUSt3R point maps and images have different lengths")
 
-                # Reshape if needed
-                if pts3d.ndim == 4:  # (B, H, W, 3)
-                    pts3d = pts3d.reshape(-1, 3)
-                elif pts3d.ndim == 3:  # (N, H*W, 3) or similar
-                    pts3d = pts3d.reshape(-1, 3)
+        point_parts: List[np.ndarray] = []
+        color_parts: List[np.ndarray] = []
+        confidence_parts: List[np.ndarray] = []
 
-                # Try to get colors
-                colors = None
-                if hasattr(scene, "imgs") and scene.imgs is not None:
-                    imgs = scene.imgs
-                    if hasattr(imgs, "cpu"):
-                        imgs = imgs.cpu().numpy()
-                    # Reshape to match points
-                    if imgs.ndim >= 3:
-                        colors = (imgs.reshape(-1, 3) * 255).astype(np.uint8)
+        for index, (prediction, image) in enumerate(zip(scene.x_out, scene.imgs)):
+            if "pts3d" not in prediction or "conf" not in prediction:
+                raise ValueError(f"MUSt3R prediction {index} lacks pts3d or conf")
 
-                # Try to get confidence
-                confidence = None
-                if hasattr(scene, "conf") and scene.conf is not None:
-                    conf = scene.conf
-                    if hasattr(conf, "cpu"):
-                        conf = conf.cpu().numpy()
-                    confidence = conf.flatten()
-
-                return PointCloud(
-                    points=pts3d.astype(np.float32),
-                    colors=colors,
-                    confidence=confidence,
-                    is_metric=False,
+            points = self._as_numpy(prediction["pts3d"]).reshape(-1, 3)
+            confidence = self._as_numpy(prediction["conf"]).reshape(-1)
+            colors = self._image_colors(image)
+            if len(points) != len(confidence) or len(points) != len(colors):
+                raise ValueError(
+                    f"MUSt3R prediction {index} has inconsistent point, "
+                    "confidence, and color shapes"
                 )
-        except Exception as e:
-            logger.warning(f"Could not extract point cloud from scene: {e}")
-            raise
-        # TODO: handle this better
-        # logger.warning("Returning empty point cloud - extraction failed")
-        # return PointCloud(points=np.zeros((0, 3), dtype=np.float32))
+
+            keep = (
+                np.isfinite(points).all(axis=1)
+                & np.isfinite(confidence)
+                & (confidence >= self.min_confidence)
+            )
+            point_parts.append(points[keep].astype(np.float32, copy=False))
+            color_parts.append(colors[keep])
+            confidence_parts.append(confidence[keep].astype(np.float32, copy=False))
+
+        if not point_parts:
+            return PointCloud(points=np.empty((0, 3), dtype=np.float32))
+
+        return PointCloud(
+            points=np.concatenate(point_parts),
+            colors=np.concatenate(color_parts),
+            confidence=np.concatenate(confidence_parts),
+            is_metric=False,
+        )
+
+    @staticmethod
+    def _as_numpy(value) -> np.ndarray:
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        if hasattr(value, "numpy"):
+            value = value.numpy()
+        return np.asarray(value)
+
+    @classmethod
+    def _image_colors(cls, image) -> np.ndarray:
+        colors = cls._as_numpy(image)
+        if colors.ndim == 3 and colors.shape[0] == 3 and colors.shape[-1] != 3:
+            colors = np.moveaxis(colors, 0, -1)
+        if colors.ndim != 3 or colors.shape[-1] != 3:
+            raise ValueError(f"MUSt3R image has unsupported shape {colors.shape}")
+        colors = colors.reshape(-1, 3)
+        if np.issubdtype(colors.dtype, np.floating):
+            finite_max = float(np.nanmax(colors)) if colors.size else 0.0
+            if finite_max <= 1.0:
+                colors = colors * 255.0
+        return np.clip(colors, 0, 255).astype(np.uint8)
 
     def _extract_poses(
         self,

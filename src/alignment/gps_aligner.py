@@ -1,32 +1,61 @@
-"""GPS-based alignment and scale recovery.
-# This should evnetually be replaced/updated to do a bundle adjustment
+"""Timestamped, quality-aware GPS alignment.
 
+The durable transform maps model coordinates into an artifact-local ENU frame.
+Its float64 ENU-to-ECEF placement is kept separately so large global
+coordinates never need to be baked into point buffers.
 """
 
-from typing import Optional, Tuple
+from __future__ import annotations
+
 import logging
+from typing import Optional, Tuple
+
 import numpy as np
 
-from ..core.types import PointCloud, CameraPoses, GPSTrack, IMUData
+from ..core.types import (
+    AlignmentResult,
+    AlignmentStatus,
+    CameraPoses,
+    GPSTrack,
+    IMUData,
+    PointCloud,
+)
 
 logger = logging.getLogger(__name__)
 
-# Alignment guardrails for sparse GPS tracks.
 MIN_GPS_TRAJECTORY_LENGTH_M = 2.0
 MIN_GPS_STD_DEV_M = 0.5
 
 
 class GPSAligner:
-    """
-    Align reconstruction to GPS coordinate system.
+    """Estimate a robust model-to-ENU similarity transform."""
 
-    This class handles two main tasks:
-    1. Scale recovery - Match reconstruction trajectory length to GPS trajectory
-    2. Position/rotation alignment - Align reconstruction to GPS coordinates
-    """
-
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        *,
+        min_correspondences: int = 6,
+        min_gps_trajectory_length_m: float = MIN_GPS_TRAJECTORY_LENGTH_M,
+        min_gps_std_dev_m: float = MIN_GPS_STD_DEV_M,
+        max_rmse_m: float = 8.0,
+        max_scale: float = 1000.0,
+        min_scale: float = 0.001,
+        min_inlier_fraction: float = 0.5,
+        max_clock_offset_s: float = 10.0,
+        clock_step_s: float = 0.1,
+        min_clock_peak_quality: float = 0.25,
+        max_gps_interpolation_gap_s: float = 2.0,
+    ) -> None:
+        self.min_correspondences = int(min_correspondences)
+        self.min_gps_trajectory_length_m = float(min_gps_trajectory_length_m)
+        self.min_gps_std_dev_m = float(min_gps_std_dev_m)
+        self.max_rmse_m = float(max_rmse_m)
+        self.max_scale = float(max_scale)
+        self.min_scale = float(min_scale)
+        self.min_inlier_fraction = float(min_inlier_fraction)
+        self.max_clock_offset_s = float(max_clock_offset_s)
+        self.clock_step_s = float(clock_step_s)
+        self.min_clock_peak_quality = float(min_clock_peak_quality)
+        self.max_gps_interpolation_gap_s = float(max_gps_interpolation_gap_s)
 
     def align(
         self,
@@ -35,307 +64,427 @@ class GPSAligner:
         gps_track: GPSTrack,
         imu_data: Optional[IMUData] = None,
         allow_scale: bool = True,
-    ) -> PointCloud:
+        *,
+        gravity_direction_model: Optional[np.ndarray] = None,
+    ) -> AlignmentResult:
+        """Align a reconstruction and return the complete attempt result.
+
+        GPS is interpolated to pose timestamps after estimating a constant
+        telemetry clock offset from trajectory speed.  ``imu_data`` is accepted
+        for API compatibility, but gravity is only constrained when the caller
+        supplies ``gravity_direction_model``.  Raw GoPro gravity is in a sensor
+        frame whose camera/model extrinsic is not yet part of Mapper's contract;
+        silently treating it as model-frame gravity would be unsafe.
         """
-        Align point cloud to GPS coordinates.
 
-        Steps:
-        1. Compute scale from GPS vs pose trajectory lengths
-        2. Compute rotation to align trajectories (Kabsch algorithm)
-        3. Compute translation to GPS origin
-        4. Apply transformation to point cloud
-
-        Args:
-            pointcloud: Point cloud to align
-            poses: Camera poses from reconstruction
-            gps_track: GPS trajectory from video telemetry
-            imu_data: Optional IMU data for gravity alignment
-
-        Returns:
-            Aligned PointCloud with is_metric=True
-        """
-        if len(poses) < 2:
-            logger.warning("Not enough poses for alignment, returning original")
-            return pointcloud
-
-        if len(gps_track) < 2:
-            logger.warning("Not enough GPS points for alignment, returning original")
-            return pointcloud
-
-        # Step 1: Scale recovery (optional)
-        if allow_scale:
-            scale = self.compute_scale(poses, gps_track)
-            if not np.isfinite(scale):
-                logger.warning("Non-finite scale factor, skipping GPS alignment")
-                return pointcloud
-            logger.info(f"Computed scale factor: {scale:.4f}")
-        else:
-            scale = 1.0
-            logger.info("Skipping GPS scale adjustment (metric alignment)")
-
-        # Step 2: Get positions in local ENU coordinates
-        pose_positions = poses.get_positions()
-        gps_enu = gps_track.to_local_enu()
-        if not np.isfinite(pose_positions).all() or not np.isfinite(gps_enu).all():
-            logger.warning("Non-finite pose or GPS positions, skipping GPS alignment")
-            return pointcloud
+        if len(poses) < self.min_correspondences:
+            return AlignmentResult.unaligned(
+                "insufficient_poses",
+                diagnostics={"pose_count": len(poses)},
+            )
+        if poses.timestamps is None:
+            return AlignmentResult.unaligned("pose_timestamps_missing")
+        if len(gps_track) < self.min_correspondences:
+            return AlignmentResult.unaligned(
+                "insufficient_gps_samples",
+                diagnostics={"gps_count": len(gps_track)},
+            )
+        if gps_track.timestamps is None:
+            return AlignmentResult.unaligned("gps_timestamps_missing")
         if not np.isfinite(pointcloud.points).all():
-            logger.warning(
-                "Non-finite pointcloud points detected, skipping GPS alignment"
-            )
-            return pointcloud
-        gps_traj_len = gps_track.get_trajectory_length_meters()
-        gps_std = float(np.mean(np.std(gps_enu, axis=0)))
-        if gps_traj_len < MIN_GPS_TRAJECTORY_LENGTH_M or gps_std < MIN_GPS_STD_DEV_M:
-            logger.warning(
-                "GPS track lacks motion (length=%.3f m, std=%.3f m), skipping GPS alignment",
-                gps_traj_len,
-                gps_std,
-            )
-            return pointcloud
+            return AlignmentResult.unaligned("pointcloud_contains_nonfinite_values")
 
-        logger.debug(
-            "GPS align stats: pose min %s max %s | gps min %s max %s",
-            np.min(pose_positions, axis=0),
-            np.max(pose_positions, axis=0),
-            np.min(gps_enu, axis=0),
-            np.max(gps_enu, axis=0),
+        filtered_gps = gps_track.filter_quality()
+        if len(filtered_gps) < self.min_correspondences:
+            return AlignmentResult.unaligned(
+                "insufficient_quality_gps_samples",
+                diagnostics={
+                    "gps_count": len(gps_track),
+                    "quality_gps_count": len(filtered_gps),
+                },
+            )
+
+        anchor_wgs84, anchor_ecef = filtered_gps.robust_anchor()
+        gps_enu = filtered_gps.to_local_enu(anchor_wgs84)
+        gps_length = _trajectory_length(gps_enu)
+        gps_horizontal_std = float(np.sqrt(np.mean(np.var(gps_enu[:, :2], axis=0))))
+        if (
+            gps_length < self.min_gps_trajectory_length_m
+            or gps_horizontal_std < self.min_gps_std_dev_m
+        ):
+            return AlignmentResult.unaligned(
+                "gps_track_lacks_motion",
+                diagnostics={
+                    "gps_trajectory_length_m": gps_length,
+                    "gps_horizontal_std_m": gps_horizontal_std,
+                    "quality_gps_count": len(filtered_gps),
+                },
+            )
+
+        pose_positions = np.asarray(poses.get_positions(), dtype=np.float64)
+        pose_timestamps = np.asarray(poses.timestamps, dtype=np.float64)
+        pose_valid = np.isfinite(pose_timestamps) & np.isfinite(pose_positions).all(
+            axis=1
         )
+        pose_positions = pose_positions[pose_valid]
+        pose_timestamps = pose_timestamps[pose_valid]
+        if len(pose_positions) < self.min_correspondences:
+            return AlignmentResult.unaligned("insufficient_finite_poses")
 
-        # Step 3: Subsample to match counts
-        pose_positions, gps_enu = self._align_sample_counts(pose_positions, gps_enu)
+        pose_timestamps, pose_positions = _sort_and_deduplicate(
+            pose_timestamps, pose_positions
+        )
+        gps_timestamps, gps_enu, gps_order = _sort_and_deduplicate_with_indices(
+            np.asarray(filtered_gps.timestamps, dtype=np.float64), gps_enu
+        )
+        if len(gps_timestamps) < self.min_correspondences:
+            return AlignmentResult.unaligned("insufficient_unique_gps_timestamps")
 
-        # Step 4: Apply scale to pose positions
-        scaled_poses = pose_positions * scale
+        clock_offset_s, clock_quality = self.estimate_clock_offset(
+            pose_positions,
+            pose_timestamps,
+            gps_enu,
+            gps_timestamps,
+        )
+        paired = self._pair_by_timestamp(
+            pose_positions,
+            pose_timestamps,
+            gps_enu,
+            gps_timestamps,
+            filtered_gps,
+            gps_order,
+            clock_offset_s,
+        )
+        source, target, weights = paired
+        if len(source) < self.min_correspondences:
+            return AlignmentResult.unaligned(
+                "insufficient_timestamp_overlap",
+                correspondence_count=len(source),
+                diagnostics={
+                    "clock_offset_s": clock_offset_s,
+                    "clock_peak_quality": clock_quality,
+                },
+            )
 
-        # Step 5: Compute rotation and translation (Kabsch algorithm)
-        rotation, translation = self._kabsch_align(scaled_poses, gps_enu)
-        if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
-            logger.warning("Non-finite alignment transform, skipping GPS alignment")
-            return pointcloud
+        scale, rotation, translation, inliers, residuals = (
+            self._robust_weighted_umeyama(
+                source,
+                target,
+                weights,
+                allow_scale=allow_scale,
+                gravity_direction_model=gravity_direction_model,
+            )
+        )
+        if not (
+            np.isfinite(scale)
+            and np.isfinite(rotation).all()
+            and np.isfinite(translation).all()
+        ):
+            return AlignmentResult.unaligned(
+                "nonfinite_alignment_solution",
+                correspondence_count=len(source),
+            )
+        if allow_scale and not (self.min_scale <= scale <= self.max_scale):
+            return AlignmentResult.unaligned(
+                "scale_out_of_range",
+                correspondence_count=len(source),
+                diagnostics={"estimated_scale": float(scale)},
+            )
 
-        # Step 6: Optionally refine rotation using gravity
-        if imu_data is not None:
-            rotation = self._refine_with_gravity(rotation, imu_data)
+        inlier_count = int(np.count_nonzero(inliers))
+        inlier_fraction = inlier_count / len(source)
+        rmse = (
+            float(
+                np.sqrt(np.average(residuals[inliers] ** 2, weights=weights[inliers]))
+            )
+            if inlier_count
+            else float("inf")
+        )
+        transformed_inliers = (
+            (scale * rotation @ source[inliers].T).T + translation
+            if inlier_count
+            else np.zeros((0, 3), dtype=np.float64)
+        )
+        residual_vectors = transformed_inliers - target[inliers]
+        horizontal_rmse = (
+            float(
+                np.sqrt(
+                    np.average(
+                        np.sum(residual_vectors[:, :2] ** 2, axis=1),
+                        weights=weights[inliers],
+                    )
+                )
+            )
+            if inlier_count
+            else float("inf")
+        )
+        vertical_rmse = (
+            float(
+                np.sqrt(
+                    np.average(
+                        residual_vectors[:, 2] ** 2,
+                        weights=weights[inliers],
+                    )
+                )
+            )
+            if inlier_count
+            else float("inf")
+        )
+        diagnostics = {
+            "gps_trajectory_length_m": gps_length,
+            "gps_horizontal_std_m": gps_horizontal_std,
+            "quality_gps_count": len(filtered_gps),
+            "inlier_fraction": inlier_fraction,
+            "median_residual_m": float(np.median(residuals)),
+            "max_residual_m": float(np.max(residuals)),
+            "arc_length_scale_diagnostic": self.compute_scale(poses, filtered_gps),
+            "gravity_constrained": gravity_direction_model is not None,
+            "imu_gravity_ignored_without_model_frame_extrinsic": (
+                imu_data is not None and gravity_direction_model is None
+            ),
+        }
+        if (
+            inlier_count < self.min_correspondences
+            or inlier_fraction < self.min_inlier_fraction
+        ):
+            return AlignmentResult.unaligned(
+                "insufficient_alignment_inliers",
+                correspondence_count=len(source),
+                diagnostics={
+                    **diagnostics,
+                    "estimated_rmse_m": rmse,
+                    "clock_offset_s": clock_offset_s,
+                    "clock_peak_quality": clock_quality,
+                },
+            )
+        if not np.isfinite(rmse) or rmse > self.max_rmse_m:
+            return AlignmentResult.unaligned(
+                "alignment_rmse_exceeds_threshold",
+                correspondence_count=len(source),
+                diagnostics={
+                    **diagnostics,
+                    "estimated_rmse_m": rmse,
+                    "max_rmse_m": self.max_rmse_m,
+                    "clock_offset_s": clock_offset_s,
+                    "clock_peak_quality": clock_quality,
+                },
+            )
 
-        # Step 7: Build transformation matrix
-        transform = np.eye(4)
-        transform[:3, :3] = rotation
+        transform = np.eye(4, dtype=np.float64)
+        transform[:3, :3] = scale * rotation
         transform[:3, 3] = translation
+        enu_to_ecef = _enu_to_ecef_transform(anchor_wgs84, anchor_ecef)
 
-        # Step 8: Apply to point cloud (including scale)
-        scaled_points = pointcloud.points * scale
-        aligned_points = (rotation @ scaled_points.T).T + translation
-        aligned_finite = np.isfinite(aligned_points).all(axis=1)
-        if not np.all(aligned_finite):
-            logger.warning(
-                "Aligned pointcloud has %d non-finite points, skipping GPS alignment",
-                int(np.count_nonzero(~aligned_finite)),
-            )
-            return pointcloud
-
-        # Get origin GPS
-        origin_gps = (
-            gps_track.latitudes[0],
-            gps_track.longitudes[0],
-            gps_track.altitudes[0] if gps_track.altitudes is not None else 0.0,
-        )
-
-        return PointCloud(
+        aligned_points = (
+            scale * rotation @ np.asarray(pointcloud.points, dtype=np.float64).T
+        ).T + translation
+        aligned_normals = None
+        if pointcloud.normals is not None:
+            aligned_normals = (
+                rotation @ np.asarray(pointcloud.normals, dtype=np.float64).T
+            ).T.astype(np.float32)
+        aligned_cloud = PointCloud(
             points=aligned_points.astype(np.float32),
             colors=pointcloud.colors,
             confidence=pointcloud.confidence,
-            normals=pointcloud.normals,
-            origin_gps=origin_gps,
-            scale=scale,
+            normals=aligned_normals,
+            origin_gps=anchor_wgs84,
+            scale=float(pointcloud.scale * scale),
             is_metric=True,
         )
+        status = (
+            AlignmentStatus.ALIGNED
+            if rmse <= min(2.0, self.max_rmse_m) and inlier_fraction >= 0.7
+            else AlignmentStatus.APPROXIMATE
+        )
+        method = (
+            "gps_gravity_constrained_weighted_umeyama"
+            if gravity_direction_model is not None
+            else "gps_robust_weighted_umeyama"
+        )
+        return AlignmentResult(
+            transform=transform,
+            enu_to_ecef_transform=enu_to_ecef,
+            scale=float(scale),
+            method=method,
+            status=status,
+            inlier_count=inlier_count,
+            correspondence_count=len(source),
+            rmse_m=rmse,
+            horizontal_rmse_m=horizontal_rmse,
+            vertical_rmse_m=vertical_rmse,
+            anchor_wgs84=anchor_wgs84,
+            anchor_ecef=anchor_ecef,
+            aligned_pointcloud=aligned_cloud,
+            clock_offset_s=clock_offset_s,
+            clock_peak_quality=clock_quality,
+            diagnostics=diagnostics,
+        )
 
-    def compute_scale(
-        self,
-        poses: CameraPoses,
-        gps_track: GPSTrack,
-    ) -> float:
-        """
-        Compute scale factor from GPS trajectory.
-
-        Scale = GPS_trajectory_length / Pose_trajectory_length
-
-        Args:
-            poses: Camera poses from reconstruction
-            gps_track: GPS trajectory
-
-        Returns:
-            Scale factor to convert reconstruction units to meters
-        """
-        gps_length = gps_track.get_trajectory_length_meters()
-        pose_length = poses.get_trajectory_length()
-
-        if pose_length < 1e-6:
-            logger.warning("Pose trajectory length near zero, using scale=1.0")
-            return 1.0
-
-        if gps_length < 1e-6:
-            logger.warning("GPS trajectory length near zero, using scale=1.0")
-            return 1.0
-
-        if not np.isfinite(pose_length) or not np.isfinite(gps_length):
-            logger.warning("Non-finite trajectory length, using scale=1.0")
-            return 1.0
-
-        scale = gps_length / pose_length
-
-        # Sanity check - scale should be reasonable
-        if scale > 1000 or scale < 0.001:
-            logger.warning(
-                f"Unusual scale factor {scale:.4f}, GPS/pose trajectories may not match"
-            )
-
-        return scale
-
-    def _align_sample_counts(
+    def estimate_clock_offset(
         self,
         pose_positions: np.ndarray,
+        pose_timestamps: np.ndarray,
         gps_positions: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Align sample counts between pose and GPS trajectories.
+        gps_timestamps: np.ndarray,
+    ) -> Tuple[float, float]:
+        """Estimate ``gps_timestamp = pose_timestamp + offset`` using speed."""
 
-        Uses linear interpolation to match the trajectory with more samples
-        to the one with fewer samples.
-        """
-        n_poses = len(pose_positions)
-        n_gps = len(gps_positions)
+        pose_speed_t, pose_speed = _trajectory_speeds(pose_positions, pose_timestamps)
+        gps_speed_t, gps_speed = _trajectory_speeds(gps_positions, gps_timestamps)
+        if len(pose_speed) < 3 or len(gps_speed) < 3:
+            return 0.0, 0.0
+        pose_scale = _robust_spread(pose_speed)
+        gps_scale = _robust_spread(gps_speed)
+        if pose_scale < 1e-9 or gps_scale < 1e-9:
+            return 0.0, 0.0
+        # Position spikes create two extreme speed samples.  Winsorizing at a
+        # robust two-sigma envelope prevents those samples from dominating the
+        # clock correlation before the spatial robust fit gets a chance to
+        # reject them.
+        normalized_pose = np.clip(
+            (pose_speed - np.median(pose_speed)) / pose_scale, -2.0, 2.0
+        )
+        normalized_gps = np.clip(
+            (gps_speed - np.median(gps_speed)) / gps_scale, -2.0, 2.0
+        )
 
-        if n_poses == n_gps:
-            return pose_positions, gps_positions
+        candidates = np.arange(
+            -self.max_clock_offset_s,
+            self.max_clock_offset_s + self.clock_step_s * 0.5,
+            self.clock_step_s,
+        )
+        best_offset = 0.0
+        best_correlation = -np.inf
+        for offset in candidates:
+            query_t = pose_speed_t + offset
+            valid = (query_t >= gps_speed_t[0]) & (query_t <= gps_speed_t[-1])
+            if np.count_nonzero(valid) < max(3, self.min_correspondences - 1):
+                continue
+            sampled_gps = np.interp(query_t[valid], gps_speed_t, normalized_gps)
+            sampled_pose = normalized_pose[valid]
+            if np.std(sampled_gps) < 1e-9 or np.std(sampled_pose) < 1e-9:
+                continue
+            correlation = float(np.corrcoef(sampled_pose, sampled_gps)[0, 1])
+            # Tiny tie breaker prefers the least invasive offset.
+            score = correlation - 1e-9 * abs(float(offset))
+            if score > best_correlation:
+                best_correlation = score
+                best_offset = float(offset)
+        if not np.isfinite(best_correlation):
+            return 0.0, 0.0
+        peak_quality = float(np.clip(best_correlation, 0.0, 1.0))
+        if peak_quality < self.min_clock_peak_quality:
+            # A low-information speed trace (or unrelated sensor clocks)
+            # should not induce an arbitrary edge-of-search offset.
+            return 0.0, peak_quality
+        return best_offset, peak_quality
 
-        # Interpolate the longer one to match the shorter
-        if n_poses > n_gps:
-            # Subsample poses to match GPS
-            indices = np.linspace(0, n_poses - 1, n_gps).astype(int)
-            return pose_positions[indices], gps_positions
-        else:
-            # Subsample GPS to match poses
-            indices = np.linspace(0, n_gps - 1, n_poses).astype(int)
-            return pose_positions, gps_positions[indices]
+    def _pair_by_timestamp(
+        self,
+        pose_positions: np.ndarray,
+        pose_timestamps: np.ndarray,
+        gps_positions: np.ndarray,
+        gps_timestamps: np.ndarray,
+        gps_track: GPSTrack,
+        gps_order: np.ndarray,
+        clock_offset_s: float,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        query_t = pose_timestamps + clock_offset_s
+        valid = (query_t >= gps_timestamps[0]) & (query_t <= gps_timestamps[-1])
+        right = np.searchsorted(gps_timestamps, query_t, side="left")
+        right = np.clip(right, 1, len(gps_timestamps) - 1)
+        left = right - 1
+        interpolation_gap = gps_timestamps[right] - gps_timestamps[left]
+        valid &= interpolation_gap <= self.max_gps_interpolation_gap_s
+        source = pose_positions[valid]
+        query_t = query_t[valid]
+        target = np.column_stack(
+            [
+                np.interp(query_t, gps_timestamps, gps_positions[:, axis])
+                for axis in range(3)
+            ]
+        )
+        weights = np.ones(len(source), dtype=np.float64)
+        if gps_track.accuracies is not None:
+            accuracy = np.asarray(gps_track.accuracies, dtype=float)[gps_order]
+            sampled = np.interp(query_t, gps_timestamps, accuracy)
+            weights *= 1.0 / np.square(np.maximum(sampled, 0.25))
+        if gps_track.position_dops is not None:
+            dop = np.asarray(gps_track.position_dops, dtype=float)[gps_order]
+            sampled = np.interp(query_t, gps_timestamps, dop)
+            weights *= 1.0 / np.square(np.maximum(sampled, 1.0))
+        weights /= max(float(np.mean(weights)), 1e-12)
+        return source, target, weights
 
-    def _kabsch_align(
+    def _robust_weighted_umeyama(
         self,
         source: np.ndarray,
         target: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compute rotation and translation to align source to target using Kabsch algorithm.
-
-        The Kabsch algorithm finds the optimal rotation matrix that minimizes
-        the RMSD between two paired sets of points.
-
-        Args:
-            source: (N, 3) source points
-            target: (N, 3) target points
-
-        Returns:
-            Tuple of (rotation_matrix, translation_vector)
-        """
-        # Center both point sets
-        source_centroid = source.mean(axis=0)
-        target_centroid = target.mean(axis=0)
-
-        source_centered = source - source_centroid
-        target_centered = target - target_centroid
-
-        # Compute covariance matrix
-        H = source_centered.T @ target_centered
-
-        # SVD
-        U, S, Vt = np.linalg.svd(H)
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Kabsch singular values: %s", S)
-
-        # Compute rotation
-        R = Vt.T @ U.T
-
-        # Handle reflection case
-        if np.linalg.det(R) < 0:
-            Vt[-1, :] *= -1
-            R = Vt.T @ U.T
-
-        # Compute translation
-        t = target_centroid - R @ source_centroid
-
-        return R, t
-
-    def _refine_with_gravity(
-        self,
-        rotation: np.ndarray,
-        imu_data: IMUData,
-    ) -> np.ndarray:
-        """
-        Refine rotation using gravity vector from IMU.
-
-        This ensures the "up" direction in the reconstruction matches
-        the real-world up direction.
-        """
-        gravity = imu_data.get_gravity_direction()
-        if gravity is None:
-            return rotation
-
-        # The gravity vector in world coordinates should be [0, 0, -1] (down)
-        # We want to find a small rotation correction that aligns
-        # the transformed gravity to [0, 0, -1]
-
-        # Transform gravity by current rotation
-        transformed_gravity = rotation @ gravity
-
-        # Target gravity direction
-        target_gravity = np.array([0, 0, -1])
-
-        # Compute rotation to align
-        v = np.cross(transformed_gravity, target_gravity)
-        c = np.dot(transformed_gravity, target_gravity)
-
-        if abs(c + 1) < 1e-6:
-            # Nearly opposite - 180 degree rotation
-            # Find any perpendicular axis
-            if abs(transformed_gravity[0]) < 0.9:
-                axis = np.cross(transformed_gravity, [1, 0, 0])
-            else:
-                axis = np.cross(transformed_gravity, [0, 1, 0])
-            axis = axis / np.linalg.norm(axis)
-            correction = self._axis_angle_to_rotation(axis, np.pi)
-        elif np.linalg.norm(v) < 1e-6:
-            # Already aligned
-            correction = np.eye(3)
-        else:
-            # General case - Rodrigues' rotation formula
-            s = np.linalg.norm(v)
-            vx = np.array(
-                [
-                    [0, -v[2], v[1]],
-                    [v[2], 0, -v[0]],
-                    [-v[1], v[0], 0],
-                ]
+        weights: np.ndarray,
+        *,
+        allow_scale: bool,
+        gravity_direction_model: Optional[np.ndarray],
+        max_iterations: int = 20,
+    ) -> Tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        base_weights = np.asarray(weights, dtype=np.float64)
+        robust_weights = base_weights.copy()
+        previous = np.full(len(source), np.inf)
+        for _ in range(max_iterations):
+            scale, rotation, translation = _weighted_similarity(
+                source,
+                target,
+                robust_weights,
+                allow_scale=allow_scale,
+                gravity_direction_model=gravity_direction_model,
             )
-            correction = np.eye(3) + vx + vx @ vx * (1 - c) / (s * s)
+            residuals = np.linalg.norm(
+                (scale * rotation @ source.T).T + translation - target,
+                axis=1,
+            )
+            median = np.median(residuals)
+            mad = np.median(np.abs(residuals - median))
+            sigma = max(1.4826 * mad, 0.25)
+            cutoff = max(1.5 * sigma, 0.5)
+            huber = np.minimum(1.0, cutoff / np.maximum(residuals, 1e-12))
+            robust_weights = base_weights * huber
+            if np.max(np.abs(previous - residuals)) < 1e-6:
+                break
+            previous = residuals
 
-        return correction @ rotation
-
-    def _axis_angle_to_rotation(
-        self,
-        axis: np.ndarray,
-        angle: float,
-    ) -> np.ndarray:
-        """Convert axis-angle to rotation matrix using Rodrigues' formula."""
-        axis = axis / np.linalg.norm(axis)
-        K = np.array(
-            [
-                [0, -axis[2], axis[1]],
-                [axis[2], 0, -axis[0]],
-                [-axis[1], axis[0], 0],
-            ]
+        threshold = max(
+            3.0
+            * max(1.4826 * np.median(np.abs(residuals - np.median(residuals))), 0.25),
+            1.0,
         )
-        return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * K @ K
+        inliers = residuals <= threshold
+        if np.count_nonzero(inliers) >= self.min_correspondences:
+            scale, rotation, translation = _weighted_similarity(
+                source[inliers],
+                target[inliers],
+                base_weights[inliers],
+                allow_scale=allow_scale,
+                gravity_direction_model=gravity_direction_model,
+            )
+            residuals = np.linalg.norm(
+                (scale * rotation @ source.T).T + translation - target,
+                axis=1,
+            )
+        return scale, rotation, translation, inliers, residuals
+
+    def compute_scale(self, poses: CameraPoses, gps_track: GPSTrack) -> float:
+        """Return the noisy arc-length ratio as a diagnostic only."""
+
+        pose_length = poses.get_trajectory_length()
+        gps_length = gps_track.get_trajectory_length_meters()
+        if (
+            pose_length < 1e-9
+            or gps_length < 1e-9
+            or not np.isfinite(pose_length)
+            or not np.isfinite(gps_length)
+        ):
+            return 1.0
+        return float(gps_length / pose_length)
 
     def compute_alignment_error(
         self,
@@ -344,28 +493,177 @@ class GPSAligner:
         scale: float,
         rotation: np.ndarray,
         translation: np.ndarray,
+        *,
+        clock_offset_s: float = 0.0,
     ) -> dict:
-        """
-        Compute alignment error metrics.
+        """Compute timestamp-paired residual summaries for a known transform."""
 
-        Returns:
-            Dictionary with error metrics (rmse, max_error, mean_error)
-        """
-        pose_positions = poses.get_positions()
-        gps_enu = gps_track.to_local_enu()
-
-        # Align sample counts
-        pose_positions, gps_enu = self._align_sample_counts(pose_positions, gps_enu)
-
-        # Apply transformation
-        transformed = (rotation @ (pose_positions * scale).T).T + translation
-
-        # Compute errors
-        errors = np.linalg.norm(transformed - gps_enu, axis=1)
-
+        if poses.timestamps is None or gps_track.timestamps is None:
+            raise ValueError("Pose and GPS timestamps are required")
+        anchor, _ = gps_track.robust_anchor()
+        gps_enu = gps_track.to_local_enu(anchor)
+        order = np.argsort(gps_track.timestamps, kind="stable")
+        gps_t = np.asarray(gps_track.timestamps)[order]
+        gps_enu = gps_enu[order]
+        query_t = np.asarray(poses.timestamps) + clock_offset_s
+        valid = (query_t >= gps_t[0]) & (query_t <= gps_t[-1])
+        source = poses.get_positions()[valid]
+        query_t = query_t[valid]
+        target = np.column_stack(
+            [np.interp(query_t, gps_t, gps_enu[:, axis]) for axis in range(3)]
+        )
+        transformed = (scale * rotation @ source.T).T + translation
+        errors = np.linalg.norm(transformed - target, axis=1)
         return {
             "rmse_meters": float(np.sqrt(np.mean(errors**2))),
             "max_error_meters": float(np.max(errors)),
             "mean_error_meters": float(np.mean(errors)),
             "median_error_meters": float(np.median(errors)),
         }
+
+
+def _weighted_similarity(
+    source: np.ndarray,
+    target: np.ndarray,
+    weights: np.ndarray,
+    *,
+    allow_scale: bool,
+    gravity_direction_model: Optional[np.ndarray],
+) -> Tuple[float, np.ndarray, np.ndarray]:
+    weights = np.asarray(weights, dtype=np.float64)
+    weights = weights / np.sum(weights)
+    source_mean = np.sum(weights[:, None] * source, axis=0)
+    target_mean = np.sum(weights[:, None] * target, axis=0)
+    source_centered = source - source_mean
+    target_centered = target - target_mean
+
+    if gravity_direction_model is None:
+        covariance = (weights[:, None] * target_centered).T @ source_centered
+        u, singular_values, vt = np.linalg.svd(covariance)
+        sign = np.ones(3)
+        if np.linalg.det(u @ vt) < 0:
+            sign[-1] = -1.0
+        rotation = u @ np.diag(sign) @ vt
+        numerator = float(np.dot(singular_values, sign))
+    else:
+        gravity = np.asarray(gravity_direction_model, dtype=np.float64)
+        if gravity.shape != (3,) or not np.isfinite(gravity).all():
+            raise ValueError("gravity_direction_model must be one finite 3-vector")
+        norm = np.linalg.norm(gravity)
+        if norm < 1e-9:
+            raise ValueError("gravity_direction_model cannot be zero")
+        level_rotation = _rotation_between(gravity / norm, np.array([0.0, 0.0, -1.0]))
+        leveled = (level_rotation @ source_centered.T).T
+        cross = np.sum(
+            weights
+            * (
+                leveled[:, 0] * target_centered[:, 1]
+                - leveled[:, 1] * target_centered[:, 0]
+            )
+        )
+        dot = np.sum(
+            weights
+            * (
+                leveled[:, 0] * target_centered[:, 0]
+                + leveled[:, 1] * target_centered[:, 1]
+            )
+        )
+        yaw = np.arctan2(cross, dot)
+        c, s = np.cos(yaw), np.sin(yaw)
+        yaw_rotation = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+        rotation = yaw_rotation @ level_rotation
+        rotated = (rotation @ source_centered.T).T
+        numerator = float(np.sum(weights * np.sum(rotated * target_centered, axis=1)))
+
+    source_variance = float(np.sum(weights * np.sum(source_centered**2, axis=1)))
+    scale = numerator / source_variance if allow_scale and source_variance > 0 else 1.0
+    translation = target_mean - scale * rotation @ source_mean
+    return float(scale), rotation, translation
+
+
+def _rotation_between(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    source = source / np.linalg.norm(source)
+    target = target / np.linalg.norm(target)
+    cross = np.cross(source, target)
+    dot = float(np.clip(np.dot(source, target), -1.0, 1.0))
+    cross_norm = np.linalg.norm(cross)
+    if cross_norm < 1e-12:
+        if dot > 0:
+            return np.eye(3)
+        basis = np.array([1.0, 0.0, 0.0])
+        if abs(source[0]) > 0.9:
+            basis = np.array([0.0, 1.0, 0.0])
+        axis = np.cross(source, basis)
+        axis /= np.linalg.norm(axis)
+        return _axis_angle(axis, np.pi)
+    axis = cross / cross_norm
+    return _axis_angle(axis, np.arctan2(cross_norm, dot))
+
+
+def _axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
+    x, y, z = axis
+    skew = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
+    return np.eye(3) + np.sin(angle) * skew + (1.0 - np.cos(angle)) * skew @ skew
+
+
+def _enu_to_ecef_transform(
+    anchor_wgs84: Tuple[float, float, float],
+    anchor_ecef: np.ndarray,
+) -> np.ndarray:
+    lat = np.deg2rad(anchor_wgs84[0])
+    lon = np.deg2rad(anchor_wgs84[1])
+    ecef_to_enu = np.array(
+        [
+            [-np.sin(lon), np.cos(lon), 0.0],
+            [-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat)],
+            [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)],
+        ],
+        dtype=np.float64,
+    )
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = ecef_to_enu.T
+    transform[:3, 3] = anchor_ecef
+    return transform
+
+
+def _sort_and_deduplicate(
+    timestamps: np.ndarray, values: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    order = np.argsort(timestamps, kind="stable")
+    timestamps = timestamps[order]
+    values = values[order]
+    unique, indices = np.unique(timestamps, return_index=True)
+    return unique, values[indices]
+
+
+def _sort_and_deduplicate_with_indices(
+    timestamps: np.ndarray, values: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    order = np.argsort(timestamps, kind="stable")
+    timestamps = timestamps[order]
+    values = values[order]
+    unique, indices = np.unique(timestamps, return_index=True)
+    return unique, values[indices], order[indices]
+
+
+def _trajectory_speeds(
+    positions: np.ndarray, timestamps: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    delta_t = np.diff(timestamps)
+    valid = np.isfinite(delta_t) & (delta_t > 1e-9)
+    speed = np.linalg.norm(np.diff(positions, axis=0), axis=1)[valid] / delta_t[valid]
+    midpoint = ((timestamps[:-1] + timestamps[1:]) * 0.5)[valid]
+    finite = np.isfinite(speed) & np.isfinite(midpoint)
+    return midpoint[finite], speed[finite]
+
+
+def _robust_spread(values: np.ndarray) -> float:
+    median = np.median(values)
+    mad = np.median(np.abs(values - median))
+    return float(max(1.4826 * mad, np.std(values) * 0.1))
+
+
+def _trajectory_length(points: np.ndarray) -> float:
+    if len(points) < 2:
+        return 0.0
+    return float(np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1)))

@@ -11,24 +11,36 @@ model_config:
   model_name: "facebook/VGGT-1B"
   weights_path: null  # Optional: local model.pt if you downloaded manually
   use_chunking: true
-  window_size: 10
-  window_overlap: 2
+  # The mixed-precision aggregator leaves enough headroom for useful temporal
+  # context on an 8 GiB GPU.
+  window_size: 20
+  window_overlap: 4
   device: "cuda"
-  image_size: 518
-  preprocess_mode: "crop"  # square | pad | crop
+  # Keep VGGT's explicitly-float32 prediction heads intact while loading its
+  # memory-heavy autocast-compatible aggregator directly as fp16.
+  weights_dtype: "mixed_float16"
+  # Acceptance profile: lower square resolution keeps a full short-video run
+  # quick. Production quality profiles can raise this to 518.
+  image_size: 168
+  preprocess_mode: "square"  # square | pad | crop
   use_point_map: false
   min_confidence: 1.0
   max_points: 50000
   sample_seed: 0
 
-input_folder: "/workspace/data/videos"
-output_folder: "/workspace/output/vggt_gopro"
+input_folder: "data/input_kings_canyon"
+output_folder: "data/output_vggt"
 
 fps: 10
 align_to_gps: true
 force_reprocess: false
-save_window_results: true
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+package_config:
+  copc_memory_limit: "4G"
+  voxel_size_m: 0.02
+  register_catalog: true
+  catalog_path: "catalog.sqlite3"
 
 alignment_config:
   window_alignment_method: "pose_overlap"
@@ -38,7 +50,7 @@ alignment_config:
   icp_voxel_size: 0.1
   icp_max_corr_dist: 0.2
   icp_init: "none"
-  gps_scale_min_std_dev_m: 0.5
+  min_gps_std_dev_m: 0.5
   save_alignment_debug: true
 
 # use for just gopro stuff

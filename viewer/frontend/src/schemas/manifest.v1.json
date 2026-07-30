@@ -1,0 +1,892 @@
+{
+  "$defs": {
+    "Alignment": {
+      "additionalProperties": false,
+      "properties": {
+        "clock_offset_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clock Offset S"
+        },
+        "clock_peak_quality": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clock Peak Quality"
+        },
+        "gravity_constrained": {
+          "default": false,
+          "title": "Gravity Constrained",
+          "type": "boolean"
+        },
+        "horizontal_rmse_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizontal Rmse M"
+        },
+        "inlier_count": {
+          "minimum": 0,
+          "title": "Inlier Count",
+          "type": "integer"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "model_to_artifact_local": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 16,
+          "minItems": 16,
+          "title": "Model To Artifact Local",
+          "type": "array"
+        },
+        "rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rejection Reason"
+        },
+        "scale": {
+          "exclusiveMinimum": 0,
+          "title": "Scale",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "manifest.v1.json#/$defs/AlignmentStatus"
+        },
+        "vertical_rmse_m": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vertical Rmse M"
+        }
+      },
+      "required": [
+        "status",
+        "method",
+        "model_to_artifact_local",
+        "scale",
+        "inlier_count"
+      ],
+      "title": "Alignment",
+      "type": "object"
+    },
+    "AlignmentStatus": {
+      "enum": [
+        "unaligned",
+        "approximate",
+        "aligned",
+        "reviewed"
+      ],
+      "title": "AlignmentStatus",
+      "type": "string"
+    },
+    "ArtifactFile": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds_max": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bounds Max"
+        },
+        "bounds_min": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bounds Min"
+        },
+        "byte_size": {
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "columns": {
+          "items": {
+            "$ref": "manifest.v1.json#/$defs/ColumnContract"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "format": {
+          "minLength": 1,
+          "title": "Format",
+          "type": "string"
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame"
+        },
+        "kind": {
+          "enum": [
+            "points",
+            "mesh",
+            "splats",
+            "poses",
+            "telemetry_gps",
+            "telemetry_imu",
+            "sources",
+            "metrics",
+            "raw"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "media_type": {
+          "title": "Media Type",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "point_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Count"
+        },
+        "representation_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Representation Id",
+          "type": "string"
+        },
+        "required_dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Dimensions",
+          "type": "array"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "representation_id",
+        "kind",
+        "format",
+        "path",
+        "media_type",
+        "byte_size",
+        "sha256"
+      ],
+      "title": "ArtifactFile",
+      "type": "object"
+    },
+    "CaptureMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "fps": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fps"
+        },
+        "frame_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame Count"
+        },
+        "gps_sample_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gps Sample Count"
+        },
+        "imu_sample_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Imu Sample Count"
+        },
+        "lens": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lens"
+        },
+        "source_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Uri"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "video_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Video Name"
+        }
+      },
+      "title": "CaptureMetadata",
+      "type": "object"
+    },
+    "ColumnContract": {
+      "additionalProperties": false,
+      "properties": {
+        "dtype": {
+          "minLength": 1,
+          "title": "Dtype",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "nullable": {
+          "default": false,
+          "title": "Nullable",
+          "type": "boolean"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "name",
+        "dtype"
+      ],
+      "title": "ColumnContract",
+      "type": "object"
+    },
+    "CoordinateFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "axis_order": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Axis Order",
+          "type": "array"
+        },
+        "crs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Crs"
+        },
+        "handedness": {
+          "enum": [
+            "right",
+            "left",
+            "unknown"
+          ],
+          "title": "Handedness",
+          "type": "string"
+        },
+        "name": {
+          "default": "artifact_local",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "origin_wgs84": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin Wgs84"
+        },
+        "pose_convention": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pose Convention"
+        },
+        "proj_pipeline": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proj Pipeline"
+        },
+        "transform_to_ecef": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transform To Ecef"
+        },
+        "units": {
+          "enum": [
+            "metre",
+            "unknown"
+          ],
+          "title": "Units",
+          "type": "string"
+        }
+      },
+      "required": [
+        "units",
+        "axis_order",
+        "handedness"
+      ],
+      "title": "CoordinateFrame",
+      "type": "object"
+    },
+    "LayerDefault": {
+      "additionalProperties": false,
+      "properties": {
+        "color_dimension": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Dimension"
+        },
+        "opacity": {
+          "default": 1.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Opacity",
+          "type": "number"
+        },
+        "point_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Budget"
+        },
+        "point_size": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Size"
+        },
+        "visible": {
+          "default": true,
+          "title": "Visible",
+          "type": "boolean"
+        }
+      },
+      "title": "LayerDefault",
+      "type": "object"
+    },
+    "LossyOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "title": "Operation",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "points_in": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Points In"
+        },
+        "points_out": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Points Out"
+        },
+        "provenance_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provenance Policy"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "LossyOperation",
+      "type": "object"
+    },
+    "Producer": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_name": {
+          "minLength": 1,
+          "title": "Adapter Name",
+          "type": "string"
+        },
+        "adapter_version": {
+          "minLength": 1,
+          "title": "Adapter Version",
+          "type": "string"
+        },
+        "capabilities": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Capabilities",
+          "type": "object"
+        },
+        "git_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Commit"
+        },
+        "git_status": {
+          "default": "unknown",
+          "enum": [
+            "clean",
+            "dirty",
+            "unknown"
+          ],
+          "title": "Git Status",
+          "type": "string"
+        },
+        "model_config": {
+          "additionalProperties": true,
+          "title": "Model Config",
+          "type": "object"
+        },
+        "model_name": {
+          "minLength": 1,
+          "title": "Model Name",
+          "type": "string"
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Version"
+        },
+        "publisher_name": {
+          "minLength": 1,
+          "title": "Publisher Name",
+          "type": "string"
+        },
+        "publisher_version": {
+          "minLength": 1,
+          "title": "Publisher Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_name",
+        "adapter_name",
+        "adapter_version",
+        "publisher_name",
+        "publisher_version"
+      ],
+      "title": "Producer",
+      "type": "object"
+    },
+    "WGS84Footprint": {
+      "additionalProperties": false,
+      "description": "A single exterior WGS84 ring, in longitude/latitude order.",
+      "properties": {
+        "coordinates": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "minItems": 4,
+          "title": "Coordinates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "coordinates"
+      ],
+      "title": "WGS84Footprint",
+      "type": "object"
+    }
+  },
+  "$id": "https://mapper.local/schemas/manifest.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alignment": {
+      "$ref": "manifest.v1.json#/$defs/Alignment"
+    },
+    "artifact_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "manifest.v1.json#/$defs/ArtifactFile"
+      },
+      "minItems": 1,
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "capture": {
+      "$ref": "manifest.v1.json#/$defs/CaptureMetadata"
+    },
+    "capture_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Capture Id",
+      "type": "string"
+    },
+    "coordinate_frame": {
+      "$ref": "manifest.v1.json#/$defs/CoordinateFrame"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "footprint_wgs84": {
+      "anyOf": [
+        {
+          "$ref": "manifest.v1.json#/$defs/WGS84Footprint"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "layer_default": {
+      "anyOf": [
+        {
+          "$ref": "manifest.v1.json#/$defs/LayerDefault"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "lossy_operations": {
+      "items": {
+        "$ref": "manifest.v1.json#/$defs/LossyOperation"
+      },
+      "title": "Lossy Operations",
+      "type": "array"
+    },
+    "producer": {
+      "$ref": "manifest.v1.json#/$defs/Producer"
+    },
+    "run_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "capture_id",
+    "artifact_id",
+    "created_at",
+    "capture",
+    "producer",
+    "coordinate_frame",
+    "alignment",
+    "artifacts"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

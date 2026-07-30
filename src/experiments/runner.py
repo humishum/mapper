@@ -5,15 +5,27 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
 import json
+import shutil
 import yaml
 import logging
 import sys
 import numpy as np
 
+from viewer.backend.domain.package import CaptureMetadata, Producer
+from viewer.backend.services.catalog import new_opaque_id
+
 from ..models import get_model
 from ..preprocessing import VideoProcessor, TelemetryExtractor
-from ..alignment import GPSAligner, WindowAligner
-from ..core.types import VideoInput
+from ..alignment import AlignmentResult, GPSAligner, WindowAligner
+from ..core.types import PointCloud, ReconstructionResult, VideoInput
+from ..publisher import CopcPublisher, CopcPublisherConfig
+from ..publisher.package import (
+    PackageIdentity,
+    PackageSource,
+    ReconstructionPackagePublisher,
+    capture_id_for_file,
+    package_source_from_window,
+)
 from .metrics import MetricsCalculator
 from .utils import get_git_info
 
@@ -39,8 +51,10 @@ class ExperimentConfig:
     align_to_gps: bool = True
     force_reprocess: bool = False
     frame_cache_dir: Optional[Path] = None
-    save_window_results: bool = False
     alignment_config: dict = field(default_factory=dict)
+    package_config: dict = field(default_factory=dict)
+    video_names: List[str] = field(default_factory=list)
+    max_videos: Optional[int] = None
 
     # Video filtering (optional)
     video_extensions: List[str] = field(
@@ -52,6 +66,8 @@ class ExperimentConfig:
         self.output_folder = Path(self.output_folder)
         if self.frame_cache_dir is not None:
             self.frame_cache_dir = Path(self.frame_cache_dir)
+        if self.max_videos is not None and self.max_videos <= 0:
+            raise ValueError("max_videos must be positive")
 
 
 class ExperimentRunner:
@@ -80,9 +96,39 @@ class ExperimentRunner:
 
         self.video_processor = VideoProcessor(fps=config.fps)
         self.telemetry_extractor = TelemetryExtractor()
-        self.gps_aligner = GPSAligner()
+        gps_option_names = {
+            "min_correspondences",
+            "min_gps_trajectory_length_m",
+            "min_gps_std_dev_m",
+            "max_rmse_m",
+            "max_scale",
+            "min_scale",
+            "min_inlier_fraction",
+            "max_clock_offset_s",
+            "clock_step_s",
+            "min_clock_peak_quality",
+            "max_gps_interpolation_gap_s",
+        }
+        gps_options = {
+            key: value
+            for key, value in config.alignment_config.items()
+            if key in gps_option_names
+        }
+        self.gps_aligner = GPSAligner(**gps_options)
         self.window_aligner = WindowAligner(config=self.config.alignment_config)
         self.metrics_calculator = MetricsCalculator()
+        copc_options = {
+            "memory_limit": self.config.package_config.get("copc_memory_limit", "4G"),
+            "threads": self.config.package_config.get("copc_threads"),
+            "temp_dir": self.config.package_config.get("temp_dir"),
+        }
+        copc_options = {
+            key: (Path(value) if key == "temp_dir" and value is not None else value)
+            for key, value in copc_options.items()
+        }
+        self.package_publisher = ReconstructionPackagePublisher(
+            CopcPublisher(CopcPublisherConfig(**copc_options))
+        )
 
         # lazy load model
         self._model = None
@@ -105,7 +151,15 @@ class ExperimentRunner:
         self.logger.addHandler(stream_handler)
 
     @classmethod
-    def from_yaml(cls, yaml_path: Path) -> "ExperimentRunner":
+    def from_yaml(
+        cls,
+        yaml_path: Path,
+        *,
+        video_names: Optional[List[str]] = None,
+        max_videos: Optional[int] = None,
+        input_folder: Optional[Path] = None,
+        output_folder: Optional[Path] = None,
+    ) -> "ExperimentRunner":
         """
         Load experiment configuration from YAML file.
 
@@ -121,16 +175,26 @@ class ExperimentRunner:
         config = ExperimentConfig(
             name=raw["name"],
             model=raw["model"],
-            input_folder=raw["input_folder"],
-            output_folder=raw["output_folder"],
+            input_folder=(
+                input_folder if input_folder is not None else raw["input_folder"]
+            ),
+            output_folder=(
+                output_folder if output_folder is not None else raw["output_folder"]
+            ),
             model_config=raw.get("model_config", {}),
             fps=raw.get("fps", DEFAULT_FRAME_RATE),
             align_to_gps=raw.get("align_to_gps", True),
             force_reprocess=raw.get("force_reprocess", False),
             frame_cache_dir=raw.get("frame_cache_dir"),
-            save_window_results=raw.get("save_window_results", False),
             video_extensions=raw.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
             alignment_config=raw.get("alignment_config", {}),
+            package_config=raw.get("package_config", {}),
+            video_names=(
+                video_names if video_names is not None else raw.get("video_names", [])
+            ),
+            max_videos=(
+                max_videos if max_videos is not None else raw.get("max_videos")
+            ),
         )
 
         return cls(config)
@@ -204,7 +268,13 @@ class ExperimentRunner:
         for ext in self.config.video_extensions:
             videos.extend(self.config.input_folder.glob(f"*{ext}"))
 
-        return sorted(videos, key=lambda p: p.stat().st_size)
+        selected = sorted(set(videos), key=lambda p: p.stat().st_size)
+        if self.config.video_names:
+            requested = {Path(name).stem for name in self.config.video_names}
+            selected = [path for path in selected if path.stem in requested]
+        if self.config.max_videos is not None:
+            selected = selected[: self.config.max_videos]
+        return selected
 
     def _setup_experiment_dir(self) -> Path:
         """Create experiment output directory."""
@@ -230,8 +300,10 @@ class ExperimentRunner:
                 if self.config.frame_cache_dir is not None
                 else None
             ),
-            "save_window_results": self.config.save_window_results,
             "alignment_config": self.config.alignment_config,
+            "package_config": self.config.package_config,
+            "video_names": self.config.video_names,
+            "max_videos": self.config.max_videos,
             "timestamp": timestamp,
             "git_commit": git_commit,
             "git_status": git_status,
@@ -245,8 +317,14 @@ class ExperimentRunner:
     def _process_video(self, video_path: Path, exp_dir: Path) -> dict:
         """Process a single video."""
         video_name = video_path.stem
-        output_dir = exp_dir / "outputs" / video_name
-        output_dir.mkdir(parents=True, exist_ok=True)
+        identity = PackageIdentity(
+            capture_id=capture_id_for_file(video_path),
+            run_id=new_opaque_id("run"),
+            artifact_id=new_opaque_id("art"),
+        )
+        package_dir = exp_dir / "reconstructions" / identity.run_id
+        work_dir = exp_dir / ".scratch" / video_name
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         # Extract frames with ffmpeg, skip if already cached in output folder
         self.logger.info("  Extracting frames...")
@@ -306,98 +384,158 @@ class ExperimentRunner:
 
         # Step 4: Run reconstruction
         self.logger.info("  Running reconstruction...")
-        result = self._model.reconstruct(video_input, output_dir)
+        result = self._model.reconstruct(video_input, work_dir)
 
-        # Save raw windowed outputs (optional) before alignment/merge.
-        if result.chunks and self.config.save_window_results:
-            self.logger.info("  Saving %d window results...", len(result.chunks))
-            self._save_window_results(result.chunks, output_dir)
-
-        # Step 4b: Align and merge windowed outputs (if chunking was used)
+        # Step 4b: Align source units without concatenating point buffers. Fixed
+        # windows are today's VRAM boundary; the package contract also accepts
+        # SLAM submaps, keyframe groups, and generic batches.
         if result.chunks:
             self.logger.info(
                 "  Aligning %d reconstruction windows...", len(result.chunks)
             )
-            merged_pointcloud, merged_poses, alignment_metadata = (
-                self.window_aligner.align_and_merge(
-                    result.chunks,
-                    result.pointcloud.is_metric,
+            source_results, poses, alignment_metadata = (
+                self.window_aligner.align_chunks(
+                    result.chunks, result.pointcloud.is_metric
                 )
             )
-            result.pointcloud = merged_pointcloud
-            result.poses = merged_poses
+            for source, source_alignment in zip(
+                source_results,
+                alignment_metadata.get("chunks", []),
+                strict=False,
+            ):
+                source.window_metadata = {
+                    **source.window_metadata,
+                    "alignment_to_common_frame": source_alignment,
+                }
             result.metadata = {
                 **result.metadata,
                 "window_alignment": alignment_metadata,
             }
+            # Release model-native chunks after their transforms and metadata
+            # have been copied into the publisher source units.
+            result.chunks = None
+        else:
+            source_results = [result]
+            poses = result.poses
 
-        # Step 5: Align to GPS (if enabled and data available)
-        if (
-            self.config.align_to_gps
-            and gps_track is not None
-            and result.poses is not None
-        ):
+        # Step 5: Align to GPS. Every path produces an explicit result so an
+        # unaligned artifact can never be mistaken for a georeferenced one.
+        alignment_result: AlignmentResult
+        if self.config.align_to_gps and gps_track is not None and poses is not None:
             self.logger.info("  Aligning to GPS...")
-            gps_scale_min_std_dev_m = float(
-                self.config.alignment_config.get("gps_scale_min_std_dev_m", 0.5)
+            # GPS alignment depends on the camera trajectory, not a materialized
+            # merged cloud. A zero-point placeholder lets the aligner solve the
+            # transform, which is then applied independently to every source.
+            alignment_input = PointCloud(
+                points=np.empty((0, 3), dtype=np.float32),
+                scale=source_results[0].pointcloud.scale,
+                is_metric=source_results[0].pointcloud.is_metric,
             )
-            gps_enu = gps_track.to_local_enu()
-            gps_std = float(np.mean(np.std(gps_enu, axis=0))) if len(gps_enu) else 0.0
-            allow_scale = not result.pointcloud.is_metric or (
-                gps_std >= gps_scale_min_std_dev_m
-            )
-            result.pointcloud = self.gps_aligner.align(
-                result.pointcloud,
-                result.poses,
+            alignment_result = self.gps_aligner.align(
+                alignment_input,
+                poses,
                 gps_track,
                 imu_data,
-                allow_scale=allow_scale,
+                allow_scale=not source_results[0].pointcloud.is_metric,
             )
+            if alignment_result.accepted:
+                # Replace one source at a time so GPS alignment needs only one
+                # additional chunk-sized point buffer, not a second full run.
+                for index, source in enumerate(source_results):
+                    source_results[index] = self._apply_global_alignment(
+                        source, alignment_result
+                    )
+                poses = alignment_result.transform_poses(poses)
+            else:
+                self.logger.warning(
+                    "  GPS alignment rejected: %s",
+                    alignment_result.reason or "quality gate failed",
+                )
+        elif not self.config.align_to_gps:
+            alignment_result = AlignmentResult.unaligned("gps_alignment_disabled")
+        elif gps_track is None:
+            alignment_result = AlignmentResult.unaligned("gps_unavailable")
+        else:
+            alignment_result = AlignmentResult.unaligned("camera_poses_unavailable")
+
+        result.metadata = {
+            **result.metadata,
+            "alignment": alignment_result.to_dict(),
+        }
 
         # Step 6: Compute metrics
         self.logger.info("  Computing metrics...")
-        metrics = self.metrics_calculator.compute_all(
-            result.pointcloud,
-            result.poses,
+        metrics = self.metrics_calculator.compute_chunks(
+            [source.pointcloud for source in source_results],
+            poses,
             gps_track,
         )
 
-        # Step 7: Save aligned point cloud
-        aligned_ply_path = output_dir / "aligned_pointcloud.ply"
-        result.pointcloud.save_ply(aligned_ply_path)
-        self.logger.info(f"  Saved: {aligned_ply_path}")
-
-        # Step 8: Save metadata.json for viewer compatibility
-        metadata_initial_gps = (
-            result.pointcloud.origin_gps
-            if result.pointcloud.origin_gps is not None
-            else initial_gps
+        # Step 7: Publish the canonical package. The package publisher writes
+        # manifest.json last, validates all checksums/contracts, then registers
+        # it in SQLite when catalog publication is enabled.
+        self.logger.info("  Publishing reconstruction package...")
+        package_sources = self._build_package_sources(
+            source_results, frame_count=frame_count
         )
-        metadata = {
-            "video_name": video_name,
-            "initial_gps_coordinates": [
-                metadata_initial_gps[0] if metadata_initial_gps else 0,
-                metadata_initial_gps[1] if metadata_initial_gps else 0,
-            ],
-            "altitude": metadata_initial_gps[2] if metadata_initial_gps else 0,
-            "frames": frame_count,
-            "is_metric": result.pointcloud.is_metric,
-            "point_count": len(result.pointcloud),
+        git_commit, git_status = get_git_info()
+        catalog_path = self._catalog_path()
+        model_capabilities = {
+            name: bool(value)
+            for name, value in self._model.get_capabilities().items()
+            if isinstance(value, (bool, np.bool_))
         }
-        metadata_path = output_dir / "metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        self.logger.info(f"  Saved: {metadata_path}")
+        published = self.package_publisher.publish(
+            package_dir,
+            identity=identity,
+            sources=package_sources,
+            alignment=alignment_result,
+            poses=poses,
+            gps_track=gps_track,
+            imu_data=imu_data,
+            capture=CaptureMetadata(
+                video_name=video_path.name,
+                source_uri=video_path.resolve().as_uri(),
+                frame_count=frame_count,
+                fps=self.config.fps,
+                gps_sample_count=len(gps_track) if gps_track is not None else 0,
+                imu_sample_count=len(imu_data) if imu_data is not None else 0,
+            ),
+            producer=Producer(
+                model_name=self.config.model,
+                model_config=self.config.model_config,
+                capabilities=model_capabilities,
+                git_commit=git_commit,
+                git_status=git_status,
+                adapter_name=f"{self.config.model}_adapter",
+                adapter_version="1.0.0",
+                publisher_name="copc-converter",
+                publisher_version="0.11.0",
+            ),
+            reconstruction_metrics=metrics,
+            model_metadata=result.metadata,
+            catalog_path=catalog_path,
+            voxel_size_m=float(self.config.package_config.get("voxel_size_m", 0.02)),
+        )
+        self.logger.info("  Published: %s", published.package_root)
+
+        # Model work products are disposable after the validated package commit.
+        shutil.rmtree(work_dir)
 
         # Build result dict
         return {
             "video": video_path.name,
             "success": True,
-            "output_dir": str(output_dir),
-            "point_count": len(result.pointcloud),
-            "is_metric": result.pointcloud.is_metric,
-            "origin_gps": result.pointcloud.origin_gps,
+            "output_dir": str(published.package_root),
+            "manifest": str(published.package.manifest_path),
+            "run_id": identity.run_id,
+            "capture_id": identity.capture_id,
+            "artifact_id": identity.artifact_id,
+            "point_count": published.copc.point_count,
+            "is_metric": all(source.pointcloud.is_metric for source in source_results),
+            "origin_gps": alignment_result.anchor_wgs84,
             "metrics": metrics,
+            "alignment": alignment_result.to_dict(),
             "model_metadata": result.metadata,
         }
 
@@ -407,6 +545,99 @@ class ExperimentRunner:
             return self.config.frame_cache_dir
         return self.config.output_folder / "_frame_cache"
 
+    @staticmethod
+    def _apply_global_alignment(
+        source: ReconstructionResult,
+        alignment: AlignmentResult,
+    ) -> ReconstructionResult:
+        """Apply one accepted model-to-local transform to a source unit."""
+
+        transformed = source.pointcloud.transform(alignment.transform)
+        transformed.origin_gps = alignment.anchor_wgs84
+        transformed.scale = float(source.pointcloud.scale * alignment.scale)
+        transformed.is_metric = True
+        return ReconstructionResult(
+            pointcloud=transformed,
+            poses=(
+                alignment.transform_poses(source.poses)
+                if source.poses is not None
+                else None
+            ),
+            metadata=dict(source.metadata),
+            window_metadata=dict(source.window_metadata),
+        )
+
+    @staticmethod
+    def _build_package_sources(
+        source_results: List[ReconstructionResult],
+        *,
+        frame_count: int,
+    ) -> List[PackageSource]:
+        """Build generic provenance while preserving current window metadata."""
+
+        if len(source_results) == 1:
+            source = source_results[0]
+            timestamps = source.poses.timestamps if source.poses is not None else None
+            return [
+                PackageSource(
+                    pointcloud=source.pointcloud,
+                    kind="capture",
+                    name="capture",
+                    frame_start=0 if frame_count else None,
+                    frame_end=frame_count - 1 if frame_count else None,
+                    frame_indices=(list(range(frame_count)) if frame_count else None),
+                    timestamp_start_s=(
+                        float(timestamps[0])
+                        if timestamps is not None and len(timestamps)
+                        else None
+                    ),
+                    timestamp_end_s=(
+                        float(timestamps[-1])
+                        if timestamps is not None and len(timestamps)
+                        else None
+                    ),
+                    metadata={
+                        "source_contract": "entire_capture",
+                        "model_metadata": source.metadata,
+                    },
+                )
+            ]
+        return [
+            package_source_from_window(
+                source.pointcloud,
+                {
+                    **source.window_metadata,
+                    "timestamp_start_s": (
+                        float(source.poses.timestamps[0])
+                        if source.poses is not None
+                        and source.poses.timestamps is not None
+                        and len(source.poses.timestamps)
+                        else None
+                    ),
+                    "timestamp_end_s": (
+                        float(source.poses.timestamps[-1])
+                        if source.poses is not None
+                        and source.poses.timestamps is not None
+                        and len(source.poses.timestamps)
+                        else None
+                    ),
+                    "model_metadata": source.metadata,
+                },
+            )
+            for source in source_results
+        ]
+
+    def _catalog_path(self) -> Path | None:
+        if not self.config.package_config.get("register_catalog", True):
+            return None
+        configured = self.config.package_config.get("catalog_path")
+        if configured is None:
+            return self.config.output_folder / "catalog.sqlite3"
+        path = Path(configured)
+        if not path.is_absolute():
+            path = self.config.output_folder / path
+        return path
+
     def _save_results(self, exp_dir: Path, results: List[dict]) -> None:
         """Save experiment results to JSON."""
         results_path = exp_dir / "results.json"
@@ -415,42 +646,6 @@ class ExperimentRunner:
             json.dump(results, f, indent=2, default=str)
 
         self.logger.info(f"Results saved to: {results_path}")
-
-    def _save_window_results(
-        self, chunks: List["ReconstructionResult"], output_dir: Path
-    ) -> None:
-        """Persist per-window reconstructions for post-processing."""
-        windows_dir = output_dir / "windows"
-        windows_dir.mkdir(parents=True, exist_ok=True)
-
-        for idx, chunk in enumerate(chunks):
-            window_id = chunk.window_metadata.get("window_id", idx)
-            window_dir = windows_dir / f"window_{int(window_id):03d}"
-            window_dir.mkdir(parents=True, exist_ok=True)
-
-            pointcloud_path = window_dir / "pointcloud.ply"
-            chunk.pointcloud.save_ply(pointcloud_path)
-
-            if chunk.poses is not None:
-                poses_path = window_dir / "poses.npz"
-                np.savez(
-                    poses_path,
-                    poses=chunk.poses.poses,
-                    timestamps=chunk.poses.timestamps,
-                    intrinsics=chunk.poses.intrinsics,
-                    frame_indices=chunk.poses.frame_indices,
-                )
-
-            metadata_path = window_dir / "metadata.json"
-            metadata = {
-                "window_metadata": chunk.window_metadata,
-                "model_metadata": chunk.metadata,
-                "point_count": len(chunk.pointcloud),
-                "is_metric": chunk.pointcloud.is_metric,
-                "has_poses": chunk.poses is not None,
-            }
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2)
 
     def _print_summary(self, results: List[dict]) -> None:
         """Print experiment summary."""
@@ -510,6 +705,30 @@ def main():
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--video",
+        action="append",
+        default=None,
+        help="Process only this video filename or stem; may be supplied more than once",
+    )
+    parser.add_argument(
+        "--max-videos",
+        type=int,
+        default=None,
+        help="Process at most this many matching videos, smallest first",
+    )
+    parser.add_argument(
+        "--input-folder",
+        type=Path,
+        default=None,
+        help="Override the config input folder for this run",
+    )
+    parser.add_argument(
+        "--output-folder",
+        type=Path,
+        default=None,
+        help="Override the config output folder for this run",
+    )
 
     args = parser.parse_args()
 
@@ -521,7 +740,15 @@ def main():
     )
 
     # Run experiment
-    runner = ExperimentRunner.from_yaml(args.config)
+    if args.max_videos is not None and args.max_videos <= 0:
+        parser.error("--max-videos must be positive")
+    runner = ExperimentRunner.from_yaml(
+        args.config,
+        video_names=args.video,
+        max_videos=args.max_videos,
+        input_folder=args.input_folder,
+        output_folder=args.output_folder,
+    )
     runner.run()
 
 

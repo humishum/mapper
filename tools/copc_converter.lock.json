@@ -1,0 +1,13 @@
+{
+  "name": "copc_converter",
+  "version": "0.11.0",
+  "repository": "https://github.com/360-geo/copc-converter",
+  "license": "MIT",
+  "platforms": {
+    "linux-x86_64": {
+      "url": "https://github.com/360-geo/copc-converter/releases/download/v0.11.0/copc_converter-v0.11.0-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "ce9cda3f4c116f9d480261c753d2fc3d4c055baf4f7216427d86879d89a6c61c",
+      "archive_member": "copc_converter"
+    }
+  }
+}

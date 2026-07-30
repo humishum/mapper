@@ -12,13 +12,9 @@ use_chunking: true
 window_size: 500  # Max frames per window
 window_overlap: 20  # Overlap between windows
 
-# Confidence thresholds for PLY output
-# Multiple PLY files will be saved at these thresholds
-confidence_thresholds:
-  - 5.0
-  - 2.0
-  - 1.5
-  - 1.05
+# Confidence is retained as a per-point COPC attribute. This only removes
+# predictions below the model-quality floor.
+min_confidence: 5.0
 
 # Memory management
 num_mem_imgs: 50  # Number of memory images for reconstruction

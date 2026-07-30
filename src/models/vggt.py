@@ -51,6 +51,7 @@ class VGGTModel(BaseModel):
         self.model_name = self.config.get("model_name", "facebook/VGGT-1B")
         self.weights_path = self.config.get("weights_path")
         self.device = self.config.get("device", "cuda")
+        self.weights_dtype = self.config.get("weights_dtype", "float32")
         self.image_size = self.config.get("image_size", 518)
         self.preprocess_mode = self.config.get("preprocess_mode", "square")
         self.use_point_map = self.config.get("use_point_map", False)
@@ -67,6 +68,7 @@ class VGGTModel(BaseModel):
             "window_size": 100,
             "window_overlap": 10,
             "device": "cuda",
+            "weights_dtype": "float32",
             "image_size": 518,
             "preprocess_mode": "square",  # square | pad | crop
             "use_point_map": False,  # False uses depth unprojection
@@ -111,8 +113,39 @@ class VGGTModel(BaseModel):
             self.model = VGGT.from_pretrained(self.model_name)
 
         self.model.to(self.device)
+        self._configure_model_precision()
         self.model.eval()
         self._is_loaded = True
+
+    def _configure_model_precision(self) -> None:
+        """Apply the configured inference precision after model placement."""
+
+        if self.weights_dtype == "mixed_float16":
+            if not self.device.startswith("cuda"):
+                raise ValueError("VGGT mixed-float16 weights require a CUDA device")
+
+            # VGGT's aggregator is the memory-heavy component and runs under
+            # autocast. Its camera/depth/point heads explicitly disable
+            # autocast and therefore must remain float32. Cast only the
+            # aggregator, then restore its token outputs to float32 at the
+            # module boundary for those heads.
+            self.model.aggregator.half()
+
+            def restore_float32_tokens(_module, _inputs, output):
+                tokens, patch_start_idx = output
+                return [token.float() for token in tokens], patch_start_idx
+
+            self._aggregator_output_hook = self.model.aggregator.register_forward_hook(
+                restore_float32_tokens
+            )
+            logger.info(
+                "Loaded VGGT aggregator as float16; prediction heads remain float32"
+            )
+        elif self.weights_dtype != "float32":
+            raise ValueError(
+                "Invalid weights_dtype "
+                f"'{self.weights_dtype}'; use 'float32' or 'mixed_float16'"
+            )
 
     def reconstruct(
         self,
@@ -294,8 +327,12 @@ class VGGTModel(BaseModel):
             amp_dtype = torch.float32
             amp_enabled = False
 
-        with torch.no_grad():
-            with torch.cuda.amp.autocast(enabled=amp_enabled, dtype=amp_dtype):
+        with torch.inference_mode():
+            with torch.amp.autocast(
+                device_type="cuda",
+                enabled=amp_enabled,
+                dtype=amp_dtype,
+            ):
                 outputs = self.model(images)
 
         return outputs

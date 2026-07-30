@@ -28,7 +28,33 @@ class WindowAligner:
         chunks: List[ReconstructionResult],
         is_metric: bool,
     ) -> Tuple[PointCloud, Optional[CameraPoses], dict]:
-        """Align windowed chunks and merge outputs."""
+        """Align windowed chunks and merge outputs.
+
+        This compatibility method materializes a merged cloud. Canonical
+        publication should call :meth:`align_chunks` and stage each returned
+        source unit independently.
+        """
+        transformed_chunks, merged_poses, alignment_metadata = self.align_chunks(
+            chunks, is_metric
+        )
+        merged_cloud = self._merge_pointclouds(
+            [chunk.pointcloud for chunk in transformed_chunks]
+        )
+        return merged_cloud, merged_poses, alignment_metadata
+
+    def align_chunks(
+        self,
+        chunks: List[ReconstructionResult],
+        is_metric: bool,
+    ) -> Tuple[List[ReconstructionResult], Optional[CameraPoses], dict]:
+        """Align chunks without concatenating their point arrays.
+
+        Keeping source units separate allows the publisher to transform,
+        consolidate, and stage them with bounded memory. It also preserves the
+        natural provenance boundary for ``PointSourceId``. The input list is
+        replaced one element at a time so model-native point buffers can be
+        released instead of retaining a second full set of windows.
+        """
         if not chunks:
             raise ValueError("No chunks provided for alignment")
 
@@ -39,6 +65,8 @@ class WindowAligner:
                 "window_id": 0,
                 "method": "identity",
                 "scale": 1.0,
+                "rotation": np.eye(3, dtype=np.float64).tolist(),
+                "translation": np.zeros(3, dtype=np.float64).tolist(),
             }
         ]
 
@@ -58,21 +86,30 @@ class WindowAligner:
             transforms.append(transform)
             alignment_log.append(log_entry)
 
-        transformed_clouds = []
+        transformed_chunks = []
         transformed_poses = []
         poses_available = all(chunk.poses is not None for chunk in chunks)
-        for chunk, (scale, rotation, translation) in zip(chunks, transforms):
-            transformed_clouds.append(
-                self._transform_pointcloud(
-                    chunk.pointcloud, scale, rotation, translation
-                )
+        for index, (chunk, (scale, rotation, translation)) in enumerate(
+            zip(chunks, transforms, strict=True)
+        ):
+            transformed_pointcloud = self._transform_pointcloud(
+                chunk.pointcloud, scale, rotation, translation
             )
+            transformed_pose = None
             if poses_available and chunk.poses is not None:
-                transformed_poses.append(
-                    self._transform_poses(chunk.poses, scale, rotation, translation)
+                transformed_pose = self._transform_poses(
+                    chunk.poses, scale, rotation, translation
                 )
+                transformed_poses.append(transformed_pose)
+            transformed_result = ReconstructionResult(
+                pointcloud=transformed_pointcloud,
+                poses=transformed_pose,
+                metadata=dict(chunk.metadata),
+                window_metadata=dict(chunk.window_metadata),
+            )
+            chunks[index] = transformed_result
+            transformed_chunks.append(transformed_result)
 
-        merged_cloud = self._merge_pointclouds(transformed_clouds)
         merged_poses = self._merge_poses(transformed_poses) if poses_available else None
 
         alignment_metadata = {
@@ -81,7 +118,7 @@ class WindowAligner:
             "chunks": alignment_log,
         }
 
-        return merged_cloud, merged_poses, alignment_metadata
+        return transformed_chunks, merged_poses, alignment_metadata
 
     def _resolve_allow_scale(self, is_metric: bool) -> bool:
         if isinstance(self.allow_scale, str) and self.allow_scale == "auto":
@@ -167,6 +204,12 @@ class WindowAligner:
                 "method": "none",
                 "scale": 1.0,
             }
+        )
+        self._maybe_add_transform_debug(
+            log_entry,
+            1.0,
+            np.eye(3, dtype=np.float64),
+            np.zeros(3, dtype=np.float64),
         )
         return (1.0, np.eye(3), np.zeros(3, dtype=np.float32)), log_entry
 
@@ -360,6 +403,8 @@ class WindowAligner:
             timestamps=poses.timestamps,
             intrinsics=poses.intrinsics,
             frame_indices=poses.frame_indices,
+            pose_convention=poses.pose_convention,
+            coordinate_frame=poses.coordinate_frame,
         )
 
     def _merge_pointclouds(self, clouds: List[PointCloud]) -> PointCloud:
@@ -459,8 +504,12 @@ class WindowAligner:
         rotation: np.ndarray,
         translation: np.ndarray,
     ) -> None:
-        if not self.save_alignment_debug:
-            return
+        """Persist the source-unit transform required for durable provenance.
+
+        These values are part of the package lineage contract, not optional
+        debug output. ``save_alignment_debug`` remains available for future
+        verbose diagnostics but never controls the transform itself.
+        """
         log_entry.update(
             {
                 "scale": float(scale),

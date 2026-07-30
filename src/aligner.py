@@ -313,17 +313,33 @@ def run_alignment_wrapper(args):
 
 
 if __name__ == "__main__":
+    import argparse
     import multiprocessing as mp
 
-    input_dir = Path("/home/ape/repos/must3rdemo/must3r/test_dir")
-    output_base = Path("/home/ape/repos/must3rdemo/must3r/test_dir/test_alignment")
+    parser = argparse.ArgumentParser(description="Compare legacy alignment methods")
+    parser.add_argument("input_dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--voxel-size", type=float, default=0.1)
+    parser.add_argument("--threshold", type=float, default=0.02)
+    parser.add_argument(
+        "--method",
+        action="append",
+        dest="methods",
+        choices=["sequential_point_to_plane", "colored_icp"],
+        help="method to run; repeat for multiple methods",
+    )
+    args = parser.parse_args()
+    input_dir = args.input_dir
+    output_base = args.output_dir
 
     print("Testing multiprocessing with spawn method...")
     mp.set_start_method("spawn", force=True)
 
-    # Define the alignment methods to test (single voxel size)
-    alignment_methods = ["sequential_point_to_plane", "colored_icp"]
-    voxel_size = 0.1  # Use a single voxel size
+    alignment_methods = args.methods or [
+        "sequential_point_to_plane",
+        "colored_icp",
+    ]
+    voxel_size = args.voxel_size
 
     # Prepare argument tuples for each method
     tasks = []
@@ -333,7 +349,7 @@ if __name__ == "__main__":
             (
                 input_dir,
                 out_path,
-                0.02,  # threshold (can be parameterized if needed)
+                args.threshold,
                 voxel_size,
                 method,
             )

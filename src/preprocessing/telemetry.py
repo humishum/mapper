@@ -23,9 +23,18 @@ class TelemetryExtractor:
     ~/repos/gopro-py/
     """
 
-    def __init__(self):
-        """Initialize telemetry extractor."""
+    def __init__(
+        self,
+        *,
+        min_gps_fix: int = 3,
+        max_gps_accuracy_m: float = 20.0,
+        max_gps_position_dop: float = 5.0,
+    ):
+        """Initialize telemetry extractor with publication-quality GPS gates."""
         self._gopropy_available = None
+        self.min_gps_fix = int(min_gps_fix)
+        self.max_gps_accuracy_m = float(max_gps_accuracy_m)
+        self.max_gps_position_dop = float(max_gps_position_dop)
         self._check_gopropy()
 
     def _check_gopropy(self) -> bool:
@@ -34,8 +43,7 @@ class TelemetryExtractor:
             return self._gopropy_available
 
         try:
-            import gopropy
-            from gopropy import StreamNotFoundError
+            import gopropy  # noqa: F401
 
             self._gopropy_available = True
             logger.debug("gopro-py library available")
@@ -67,7 +75,7 @@ class TelemetryExtractor:
 
             logger.info(f"Extracting telemetry from {video_path.name}")
             telemetry = gopropy.load(str(video_path))
-            print(f"Telemetry: {telemetry.list_streams()}")
+            logger.debug("Telemetry streams: %s", telemetry.list_streams())
             gps_track = self._extract_gps(telemetry)
             imu_data = self._extract_imu(telemetry)
 
@@ -77,9 +85,11 @@ class TelemetryExtractor:
             logger.warning(f"Failed to extract telemetry: {e}")
             return None, None
 
+    # Compatibility alias used by the opt-in integration test and older tools.
+    extract = extract_gps_imu
+
     def _extract_gps(self, telemetry) -> Optional[GPSTrack]:
         """Extract GPS track from telemetry."""
-        # todo: clean up this code, super weird
         try:
             # Import StreamNotFoundError here since it's only available when gopro-py is installed
             try:
@@ -96,41 +106,32 @@ class TelemetryExtractor:
                 "GPS9",
                 "GPS (Lat., Long., Alt., ...)",
                 "GPS (Lat., Long., Alt., 2D speed, 3D speed)",
-                "GPS (Lat., Long., Alt., 2D speed, 3D speed)",
             ]:
                 try:
-                    print(f"Trying to get GPS stream: {name}")
                     gps_stream = telemetry.get_stream(name)
-                    print(f"Found GPS stream: {gps_stream}")
+                    logger.debug("Found GPS stream: %s", name)
                     break
-                except (KeyError, AttributeError, StreamNotFoundError) as e:
-                    print(f"Failed to get GPS stream: {name}")
-                    print(f"Error: {e}")
+                except (KeyError, AttributeError, StreamNotFoundError):
                     continue
 
             if gps_stream is None:
-                print("No GPS stream found in telemetry")
+                logger.debug("No GPS stream found in telemetry")
                 return None
 
-            # Convert to dataframe for easier access
-            df = gps_stream.to_dataframe()
+            # Recent gopropy versions expose GPSF/GPSP and stream validity via
+            # include_quality.  Fall back cleanly for older local checkouts.
+            try:
+                df = gps_stream.to_dataframe(include_quality=True)
+            except TypeError:
+                df = gps_stream.to_dataframe()
 
             # Find latitude/longitude columns
-            lat_col = None
-            lon_col = None
-            alt_col = None
-
-            for col in df.columns:
-                col_lower = col.lower()
-                if "lat" in col_lower:
-                    lat_col = col
-                elif "lon" in col_lower:
-                    lon_col = col
-                elif "alt" in col_lower:
-                    alt_col = col
+            lat_col = self._find_column(df.columns, "lat", "latitude")
+            lon_col = self._find_column(df.columns, "lon", "longitude")
+            alt_col = self._find_column(df.columns, "alt", "altitude")
 
             if lat_col is None or lon_col is None:
-                print("Could not find lat/lon columns in GPS data")
+                logger.warning("Could not find lat/lon columns in GPS data")
                 return None
 
             # Extract data
@@ -145,15 +146,65 @@ class TelemetryExtractor:
             if "timestamp" in df.columns:
                 timestamps = df["timestamp"].values.astype(np.float64)
 
-            # Filter out invalid GPS readings (0,0 coordinates)
+            fix_col = self._find_column(df.columns, "fix", "gps_fix")
+            fixes = (
+                df[fix_col].values.astype(np.float64) if fix_col is not None else None
+            )
+
+            fourcc = str(getattr(gps_stream, "metadata", {}).get("fourcc", ""))
+            dop_col = self._find_column(df.columns, "dop", "pdop", "position_dop")
+            position_dops = (
+                df[dop_col].values.astype(np.float64) if dop_col is not None else None
+            )
+            # GPS9 embeds DOP in its eighth field.  GPS5's separate GPSP value
+            # is exposed by gopropy as a positional precision in metres.
+            accuracy_col = None
+            if fourcc != "GPS9":
+                accuracy_col = self._find_column(
+                    df.columns,
+                    "gps_error_m",
+                    "horizontal_accuracy_m",
+                    "accuracy",
+                    "precision",
+                )
+            accuracies = (
+                df[accuracy_col].values.astype(np.float64)
+                if accuracy_col is not None
+                else None
+            )
+
             valid_mask = (
                 np.isfinite(latitudes)
                 & np.isfinite(longitudes)
-                & (latitudes != 0)
-                & (longitudes != 0)
+                & (latitudes >= -90.0)
+                & (latitudes <= 90.0)
+                & (longitudes >= -180.0)
+                & (longitudes <= 180.0)
+                & ~((latitudes == 0.0) & (longitudes == 0.0))
             )
+            if altitudes is not None:
+                valid_mask &= np.isfinite(altitudes)
+            if timestamps is not None:
+                valid_mask &= np.isfinite(timestamps)
+            valid_col = self._find_column(df.columns, "valid")
+            if valid_col is not None:
+                valid_mask &= df[valid_col].values.astype(bool)
+            if fixes is not None:
+                valid_mask &= np.isfinite(fixes) & (fixes >= self.min_gps_fix)
+            if accuracies is not None:
+                valid_mask &= (
+                    np.isfinite(accuracies)
+                    & (accuracies >= 0.0)
+                    & (accuracies <= self.max_gps_accuracy_m)
+                )
+            if position_dops is not None:
+                valid_mask &= (
+                    np.isfinite(position_dops)
+                    & (position_dops >= 0.0)
+                    & (position_dops <= self.max_gps_position_dop)
+                )
             if not valid_mask.any():
-                print("No valid GPS readings found (all 0,0)")
+                logger.warning("No GPS readings passed coordinate/fix/precision gates")
                 return None
 
             latitudes = latitudes[valid_mask]
@@ -162,19 +213,50 @@ class TelemetryExtractor:
                 altitudes = altitudes[valid_mask]
             if timestamps is not None:
                 timestamps = timestamps[valid_mask]
+            if accuracies is not None:
+                accuracies = accuracies[valid_mask]
+            if fixes is not None:
+                fixes = fixes[valid_mask]
+            if position_dops is not None:
+                position_dops = position_dops[valid_mask]
 
-            print(f"Extracted GPS track with {len(latitudes)} points")
+            logger.info(
+                "Extracted %d quality GPS samples (%d rejected)",
+                len(latitudes),
+                int(np.count_nonzero(~valid_mask)),
+            )
 
             return GPSTrack(
                 latitudes=latitudes,
                 longitudes=longitudes,
                 altitudes=altitudes,
                 timestamps=timestamps,
+                accuracies=accuracies,
+                fixes=fixes,
+                position_dops=position_dops,
             )
 
         except Exception as e:
             logger.warning(f"Failed to extract GPS data: {e}")
             return None
+
+    @staticmethod
+    def _find_column(columns, *candidates):
+        """Find a telemetry column by exact normalized name, then suffix."""
+
+        normalized = {
+            str(column).lower().strip().replace(" ", "_"): column for column in columns
+        }
+        for candidate in candidates:
+            key = candidate.lower().strip().replace(" ", "_")
+            if key in normalized:
+                return normalized[key]
+        for candidate in candidates:
+            key = candidate.lower().strip().replace(" ", "_")
+            for normalized_name, original in normalized.items():
+                if normalized_name.endswith(f"_{key}"):
+                    return original
+        return None
 
     def _extract_imu(self, telemetry) -> Optional[IMUData]:
         """Extract IMU data from telemetry."""

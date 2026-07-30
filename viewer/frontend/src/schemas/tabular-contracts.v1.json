@@ -1,0 +1,50 @@
+{
+  "$id": "https://mapper.local/schemas/tabular-contracts.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Canonical Parquet column contracts. Additional model-specific columns are allowed.",
+  "schema_version": "1.0.0",
+  "tables": {
+    "cameras/poses.parquet": {
+      "required_columns": {
+        "timestamp_s": {"dtype": "float64", "unit": "second"},
+        "frame_index": {"dtype": "int64"},
+        "tx": {"dtype": "float64", "unit": "metre"},
+        "ty": {"dtype": "float64", "unit": "metre"},
+        "tz": {"dtype": "float64", "unit": "metre"},
+        "qx": {"dtype": "float64"},
+        "qy": {"dtype": "float64"},
+        "qz": {"dtype": "float64"},
+        "qw": {"dtype": "float64"},
+        "fx": {"dtype": "float64", "unit": "pixel"},
+        "fy": {"dtype": "float64", "unit": "pixel"},
+        "cx": {"dtype": "float64", "unit": "pixel"},
+        "cy": {"dtype": "float64", "unit": "pixel"}
+      },
+      "pose_convention": "Declared by manifest.coordinate_frame.pose_convention"
+    },
+    "telemetry/gps.parquet": {
+      "required_columns": {
+        "timestamp_s": {"dtype": "float64", "unit": "second"},
+        "longitude_deg": {"dtype": "float64", "unit": "degree_east"},
+        "latitude_deg": {"dtype": "float64", "unit": "degree_north"},
+        "ellipsoidal_height_m": {"dtype": "float64", "unit": "metre"},
+        "fix_type": {"dtype": "int64"},
+        "hdop": {"dtype": "float64"}
+      },
+      "recommended_columns": {
+        "horizontal_accuracy_m": {"dtype": "float64", "unit": "metre"}
+      }
+    },
+    "telemetry/imu.parquet": {
+      "required_columns": {
+        "timestamp_s": {"dtype": "float64", "unit": "second"},
+        "accel_x_mps2": {"dtype": "float64", "unit": "metre_per_second_squared"},
+        "accel_y_mps2": {"dtype": "float64", "unit": "metre_per_second_squared"},
+        "accel_z_mps2": {"dtype": "float64", "unit": "metre_per_second_squared"},
+        "gyro_x_radps": {"dtype": "float64", "unit": "radian_per_second"},
+        "gyro_y_radps": {"dtype": "float64", "unit": "radian_per_second"},
+        "gyro_z_radps": {"dtype": "float64", "unit": "radian_per_second"}
+      }
+    }
+  }
+}

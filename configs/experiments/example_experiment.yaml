@@ -14,19 +14,24 @@ model_config:
   retrieval_path: "/path/to/retrieval/data"
   image_size: 512
   window_size: 500
-  confidence_thresholds:
-    - 5.0
-    - 2.0
+  min_confidence: 5.0
 
 # Input/Output folders
-input_folder: "/home/ape/gopro_videos/tahoe_trails"
-output_folder: "/home/ape/mapper_output/experiments"
+input_folder: "/path/to/videos"
+output_folder: "/path/to/output"
 
 # Processing options
 fps: 10  # Frame extraction rate
 align_to_gps: true  # Align output to GPS coordinates
 force_reprocess: false  # Re-extract frames even if cached
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+# Canonical reconstruction-package v1 publication
+package_config:
+  copc_memory_limit: "4G"
+  voxel_size_m: 0.02
+  register_catalog: true
+  catalog_path: "catalog.sqlite3"  # Relative paths resolve below output_folder
 
 # Video filtering
 video_extensions:

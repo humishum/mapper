@@ -9,16 +9,22 @@ model: "da3_streaming"
 
 model_config:
   # Local DA3-Streaming repo (required to run the external script)
-  da3_path: "/home/ape/repos/da3-streaming"
+  da3_path: "../da3-streaming"
   # Optional: DA3 config file (relative to this repo or absolute)
   da3_config_path: "configs/da3_streaming/base_config.yaml"
   save_per_frame_depth: false
   device: "cuda"
 
-input_folder: "/home/ape/repos/mapper/data/input_kings_canyon"
-output_folder: "/home/ape/repos/mapper/data/output_kings_canyon"
+input_folder: "data/input_kings_canyon"
+output_folder: "data/output_kings_canyon"
 
 fps: 10
 align_to_gps: true
 force_reprocess: false
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)
+
+package_config:
+  copc_memory_limit: "4G"
+  voxel_size_m: 0.02
+  register_catalog: true
+  catalog_path: "catalog.sqlite3"

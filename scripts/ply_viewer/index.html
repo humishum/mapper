@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PLY Viewer (deck.gl)</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #0f1220;
+        --panel: rgba(255, 255, 255, 0.08);
+        --text: #f4f6ff;
+        --muted: #9aa3c7;
+        --accent: #ffb200;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        background: radial-gradient(circle at 15% 15%, #202553 0%, var(--bg) 55%);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 24px;
+        background: var(--panel);
+        backdrop-filter: blur(10px);
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .row input[type="text"] {
+        width: 320px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text);
+      }
+
+      .row button {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .row button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .control-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      input[type="file"] {
+        color: var(--text);
+      }
+
+      input[type="range"] {
+        width: 160px;
+      }
+
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .dropzone {
+        margin-left: auto;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px dashed rgba(255, 255, 255, 0.35);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .dropzone.dragging {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      #deck-container {
+        width: 100vw;
+        height: calc(100vh - 86px);
+      }
+
+      canvas {
+        width: 100% !important;
+        height: 100% !important;
+      }
+
+      .sample-path {
+        padding: 0 24px 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .sample-path code {
+        color: var(--accent);
+      }
+
+      @media (max-width: 780px) {
+        header {
+          gap: 12px;
+        }
+
+        .dropzone {
+          width: 100%;
+          margin-left: 0;
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PLY Viewer</h1>
+      <div class="controls">
+        <div class="control-block">
+          <label for="fileInput">Choose PLY file</label>
+          <input id="fileInput" type="file" accept=".ply" />
+        </div>
+        <div class="control-block">
+          <label for="urlInput">Load from URL</label>
+          <div class="row">
+            <input id="urlInput" type="text" placeholder="http://server:8000/path/to/file.ply" />
+            <button id="urlLoad" type="button">Load</button>
+          </div>
+        </div>
+        <div class="control-block">
+          <label for="pointSize">Point size</label>
+          <input id="pointSize" type="range" min="1" max="8" step="0.5" value="2" />
+        </div>
+      </div>
+      <div id="status" class="status">Drop a .ply file to begin.</div>
+      <div id="dropzone" class="dropzone">Drop .ply here</div>
+    </header>
+
+    <div class="sample-path">
+      Example file: <code>/home/ape/repos/mapper/data/output_kings_canyon/kings_canyon_must3r_20260105_211309/outputs/kings_canyon_1/aligned_pointcloud.ply</code>
+    </div>
+
+    <div id="deck-container"></div>
+
+    <script type="module">
+      import { Deck, OrbitView, COORDINATE_SYSTEM } from 'https://unpkg.com/@deck.gl/core@8.9.35/esm/index.js';
+      import { PointCloudLayer } from 'https://unpkg.com/@deck.gl/layers@8.9.35/esm/index.js';
+      import { parse } from 'https://unpkg.com/@loaders.gl/core@4.0.3/dist/esm/index.js';
+      import { PLYLoader } from 'https://unpkg.com/@loaders.gl/ply@4.0.3/dist/esm/ply-loader.js';
+
+      const fileInput = document.getElementById('fileInput');
+      const urlInput = document.getElementById('urlInput');
+      const urlLoad = document.getElementById('urlLoad');
+      const pointSizeInput = document.getElementById('pointSize');
+      const statusEl = document.getElementById('status');
+      const dropzone = document.getElementById('dropzone');
+      const deckContainer = document.getElementById('deck-container');
+
+      let deckgl = null;
+      let currentPointCloud = null;
+
+      function setStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      function computeBounds(positions) {
+        const min = [Infinity, Infinity, Infinity];
+        const max = [-Infinity, -Infinity, -Infinity];
+
+        for (let i = 0; i < positions.length; i += 3) {
+          const x = positions[i];
+          const y = positions[i + 1];
+          const z = positions[i + 2];
+
+          if (x < min[0]) min[0] = x;
+          if (y < min[1]) min[1] = y;
+          if (z < min[2]) min[2] = z;
+          if (x > max[0]) max[0] = x;
+          if (y > max[1]) max[1] = y;
+          if (z > max[2]) max[2] = z;
+        }
+
+        const center = [
+          (min[0] + max[0]) / 2,
+          (min[1] + max[1]) / 2,
+          (min[2] + max[2]) / 2
+        ];
+
+        const radius = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2;
+
+        return { center, radius };
+      }
+
+      function normalizeColors(colors) {
+        if (!colors) {
+          return null;
+        }
+
+        if (colors instanceof Uint8Array) {
+          return colors;
+        }
+
+        let maxValue = 0;
+        for (let i = 0; i < Math.min(colors.length, 300); i += 1) {
+          if (colors[i] > maxValue) {
+            maxValue = colors[i];
+          }
+        }
+
+        const scale = maxValue <= 1.5 ? 255 : 1;
+        const normalized = new Uint8Array(colors.length);
+        for (let i = 0; i < colors.length; i += 1) {
+          normalized[i] = Math.min(255, Math.max(0, Math.round(colors[i] * scale)));
+        }
+
+        return normalized;
+      }
+
+      function renderPointCloud(pointCloud) {
+        const { positions, colors, center, radius } = pointCloud;
+        const pointSize = Number(pointSizeInput.value);
+
+        const layerProps = {
+          id: 'pointcloud',
+          data: {
+            length: positions.length / 3,
+            attributes: {
+              getPosition: { value: positions, size: 3 }
+            }
+          },
+          pointSize,
+          opacity: 1,
+          coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+          sizeUnits: 'pixels',
+          billboard: true
+        };
+
+        if (colors) {
+          layerProps.data.attributes.getColor = { value: colors, size: 3 };
+        } else {
+          layerProps.getColor = [255, 255, 255];
+        }
+
+        const layer = new PointCloudLayer(layerProps);
+        const viewState = {
+          target: center,
+          distance: Math.max(radius * 3, 1),
+          rotationX: 25,
+          rotationOrbit: 35
+        };
+
+        if (deckgl) {
+          deckgl.finalize();
+        }
+
+        deckgl = new Deck({
+          parent: deckContainer,
+          views: new OrbitView(),
+          controller: true,
+          initialViewState: viewState,
+          layers: [layer]
+        });
+      }
+
+      async function loadPly(file) {
+        setStatus(`Loading ${file.name}...`);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const mesh = await parse(arrayBuffer, PLYLoader);
+
+          const positionAttr = mesh.attributes.POSITION || mesh.attributes.position;
+          if (!positionAttr) {
+            throw new Error('PLY missing POSITION attribute');
+          }
+
+          const rawPositions = positionAttr.value || positionAttr;
+          const rawColorsAttr =
+            mesh.attributes.COLOR_0 ||
+            mesh.attributes.color ||
+            mesh.attributes.COLOR;
+          const rawColors = rawColorsAttr ? rawColorsAttr.value || rawColorsAttr : null;
+
+          const positions = rawPositions instanceof Float32Array ? rawPositions : new Float32Array(rawPositions);
+          const colors = normalizeColors(rawColors);
+          const { center, radius } = computeBounds(positions);
+
+          currentPointCloud = { positions, colors, center, radius };
+          renderPointCloud(currentPointCloud);
+
+          const totalPoints = positions.length / 3;
+          setStatus(`Loaded ${totalPoints.toLocaleString()} points from ${file.name}`);
+        } catch (error) {
+          console.error(error);
+          setStatus(`Failed to load: ${error.message}`);
+        }
+      }
+
+      async function loadPlyFromUrl(url) {
+        if (!url) {
+          setStatus('Enter a URL to load a PLY file.');
+          return;
+        }
+
+        setStatus(`Fetching ${url}...`);
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const arrayBuffer = await response.arrayBuffer();
+          const blob = new Blob([arrayBuffer]);
+          const fakeFile = new File([blob], url.split('/').pop() || 'remote.ply', { type: 'application/octet-stream' });
+          await loadPly(fakeFile);
+        } catch (error) {
+          console.error(error);
+          setStatus(`Failed to fetch: ${error.message}`);
+        }
+      }
+
+      fileInput.addEventListener('change', event => {
+        const file = event.target.files[0];
+        if (file) {
+          loadPly(file);
+        }
+      });
+
+      urlLoad.addEventListener('click', () => {
+        loadPlyFromUrl(urlInput.value.trim());
+      });
+
+      urlInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          loadPlyFromUrl(urlInput.value.trim());
+        }
+      });
+
+      pointSizeInput.addEventListener('input', () => {
+        if (currentPointCloud) {
+          renderPointCloud(currentPointCloud);
+        }
+      });
+
+      dropzone.addEventListener('dragover', event => {
+        event.preventDefault();
+        dropzone.classList.add('dragging');
+      });
+
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('dragging');
+      });
+
+      dropzone.addEventListener('drop', event => {
+        event.preventDefault();
+        dropzone.classList.remove('dragging');
+        const file = event.dataTransfer.files[0];
+        if (file) {
+          loadPly(file);
+        }
+      });
+    </script>
+  </body>
+</html>

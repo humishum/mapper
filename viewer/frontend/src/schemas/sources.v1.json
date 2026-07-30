@@ -1,0 +1,181 @@
+{
+  "$defs": {
+    "SourceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_id": {
+          "title": "Capture Id",
+          "type": "string"
+        },
+        "frame_end": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame End"
+        },
+        "frame_indices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame Indices"
+        },
+        "frame_start": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame Start"
+        },
+        "kind": {
+          "enum": [
+            "window",
+            "submap",
+            "keyframe_group",
+            "batch",
+            "capture"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "point_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Count"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "source_index": {
+          "maximum": 65535,
+          "minimum": 0,
+          "title": "Source Index",
+          "type": "integer"
+        },
+        "timestamp_end_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp End S"
+        },
+        "timestamp_start_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Start S"
+        }
+      },
+      "required": [
+        "source_index",
+        "kind",
+        "capture_id",
+        "run_id"
+      ],
+      "title": "SourceRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://mapper.local/schemas/sources.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "granularity": {
+      "enum": [
+        "window",
+        "submap",
+        "keyframe_group",
+        "batch",
+        "capture"
+      ],
+      "title": "Granularity",
+      "type": "string"
+    },
+    "provenance_dimension": {
+      "enum": [
+        "PointSourceId",
+        "SourceIndex"
+      ],
+      "title": "Provenance Dimension",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "sources.v1.json#/$defs/SourceRecord"
+      },
+      "title": "Sources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "provenance_dimension",
+    "granularity",
+    "sources"
+  ],
+  "title": "SourcesDocument",
+  "type": "object"
+}

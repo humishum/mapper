@@ -1,125 +1,105 @@
-# 3D Pointcloud Map Viewer
+# Mapper reconstruction viewer
 
-A web-native pointcloud viewer that displays 3D reconstruction data on an interactive world map using deck.gl.
+The Phase 2 viewer is one React application and viewport with two renderer
+modes:
 
-## Overview
+- an ECEF Giro3D globe for catalog footprints and lightweight markers; and
+- an origin-centered Giro3D detail scene for COPC geometry, trajectories,
+  picking, and provenance inspection.
 
-This viewer allows you to:
-- View a world map with markers showing pointcloud data locations
-- Click on markers to load and display 3D pointclouds
-- Navigate and explore multiple pointclouds simultaneously
-- Control point size, rendering options, and camera views
+The modes cross-fade without page navigation. Selecting an aligned artifact
+uses its authoritative float64 artifact-local-to-ECEF transform while rendering
+relative to the active site origin. An unaligned artifact opens only in its
+native-local frame and displays its alignment rejection reason.
 
 ## Architecture
 
-- **Backend (Python)**: FastAPI server that loads PLY files, downsamples points, and transforms coordinates
-- **Frontend (React + deck.gl)**: Interactive map with WebGL rendering of pointclouds
+```mermaid
+flowchart LR
+    DB["SQLite catalog"] --> API["FastAPI /api/v1 control plane"]
+    PKG["Validated package files"] --> RANGE["HTTP range data plane"]
+    API --> APP["React 18 + TypeScript application"]
+    RANGE --> DETAIL["Origin-centered Giro3D detail renderer"]
+    APP --> OVERVIEW["ECEF Giro3D overview renderer"]
+    APP --> DETAIL
+    DETAIL --> PICK["Browser-side COPC picking + sources.json lookup"]
+```
 
-## Quick Start
+The backend serves catalog metadata, manifests, sidecars, and immutable
+range-readable assets. It never parses, downsamples, or reprojects points on a
+view request. The browser owns COPC traversal and LAZ decoding.
 
-### 1. Setup Backend
+## Configuration
+
+Backend:
+
+```bash
+export MAPPER_CATALOG_PATH=/home/ape/mapper_output/phase1_fresh/catalog.sqlite3
+export PORT=8000
+```
+
+Frontend variables are read by Vite:
+
+```bash
+export VITE_API_ROOT=http://127.0.0.1:8000
+export VITE_BASEMAP_ENABLED=true
+export VITE_BASEMAP_URL='https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+export VITE_BASEMAP_ATTRIBUTION='© OpenStreetMap contributors'
+```
+
+Set `VITE_BASEMAP_ENABLED=false` for a network-isolated session. Terrain,
+offline basemap packaging, hosting/auth, temporal comparison, bulk legacy
+migration, and SLAM reconstruction are outside Phase 2.
+
+## Run
+
+Install the backend and frontend dependencies once:
 
 ```bash
 cd viewer
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+venv/bin/pip install -r requirements.txt
+cd frontend
+npm ci
 ```
 
-### 2. Configure
-
-Copy `.env.example` to `.env` and adjust if needed:
-```bash
-DATA_DIR=/home/ape/mapper_output/122225-must3r
-PORT=8000
-```
-
-### 3. Start Backend
+Then start both processes:
 
 ```bash
-cd viewer
-source venv/bin/activate
-python -m backend.server
+./viewer/start.sh
 ```
 
-The API will be available at http://localhost:8000
+This defaults to the persistent five-artifact catalog at
+`/home/ape/mapper_output/phase1_fresh/catalog.sqlite3`. Use
+`./viewer/start.sh --production` for an optimized build,
+`./viewer/start.sh --no-basemap` for a network-isolated session, and
+`./viewer/start.sh --help` for port, host, and catalog overrides.
 
-### 4. Setup Frontend
+Or run them separately from the repository root:
 
 ```bash
-cd viewer/frontend
-npm install
+.venv/bin/python -m viewer.backend.server
+cd viewer/frontend && npm run dev
 ```
 
-### 5. Start Frontend
+The frontend is at `http://127.0.0.1:5173`, the API is at
+`http://127.0.0.1:8000`, and generated OpenAPI documentation is at
+`http://127.0.0.1:8000/docs`.
 
-```bash
-cd viewer/frontend
-npm run dev
-```
+## Data and lifecycle rules
 
-The app will be available at http://localhost:5173
+- Overview bbox queries are debounced by 150 ms and split at the
+  antimeridian.
+- Manifest and representation details are fetched only after selection.
+- Overview never initializes a COPC source.
+- Detail uses a two-million-point global budget, SSE threshold 1, decode
+  stride 2, and 256 MB CPU/GPU geometry caps.
+- At most two same-site detail COPCs share the budget. An artifact over 10 km
+  from the active origin requires returning through overview.
+- Leaving detail aborts in-flight requests and disposes sources, workers,
+  cached node attributes, and geometry.
+- `PointSourceId` resolves through `sources.json`; `ContributorCount` is always
+  meaningful and `Confidence` controls are disabled when absent.
 
-## API Endpoints
-
-- `GET /api/locations` - Get all available locations with GPS coordinates
-- `GET /api/pointcloud/{location_name}` - Load pointcloud data for a location
-  - Query params: `sequence`, `threshold`, `max_points`, `use_gps_coords`
-
-## Development
-
-### Backend Structure
-
-```
-backend/
-├── server.py              # FastAPI application
-├── data_service.py        # Pointcloud loading and processing
-├── coordinate_transform.py # GPS coordinate transformations
-├── config.py              # Configuration management
-└── __init__.py
-```
-
-### Frontend Structure
-
-```
-frontend/
-└── src/
-    ├── App.jsx            # Main application
-    ├── components/        # React components
-    ├── services/          # API clients
-    └── utils/             # Utility functions
-```
-
-## Technology Stack
-
-### Backend
-- FastAPI - Web framework
-- plyfile - PLY file parsing
-- NumPy - Point processing
-- uvicorn - ASGI server
-
-### Frontend
-- React - UI framework
-- deck.gl - WebGL visualization
-- Vite - Build tool
-- MapLibre GL - Base map
-
-## Performance
-
-- Points are downsampled on the backend (default: 100k points per location)
-- Results are cached in memory
-- deck.gl provides hardware-accelerated rendering
-- Frustum culling automatically hides off-screen points
-
-## Future Enhancements
-
-- Progressive loading (low-res first, then full resolution)
-- Distance-based LOD
-- Redis caching for production
-- Point picking and measurements
-- Animation and playback
-
-## License
-
-Part of the mapper project.
-
+`scripts/ply_viewer/` remains the documented local-frame debugging tool. It is
+not part of the product serving path.

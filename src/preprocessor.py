@@ -93,7 +93,7 @@ class Preprocessor:
 
     def _check_ffmpeg_installed(self):
         try:
-            logger.info(f"Checking if FFmpeg is installed")
+            logger.info("Checking if FFmpeg is installed")
             subprocess.run(
                 ["ffmpeg", "-version"],
                 check=True,
@@ -107,7 +107,7 @@ class Preprocessor:
 
     def _check_exiftool_installed(self):
         try:
-            logger.info(f"Checking if ExifTool is installed")
+            logger.info("Checking if ExifTool is installed")
             subprocess.run(
                 ["exiftool", "-ver"],
                 check=True,
@@ -394,8 +394,14 @@ class Preprocessor:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Extract frames from one video")
+    parser.add_argument("video", type=Path)
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
     preprocessor = Preprocessor(
-        video_path=Path("/home/ape/Documents/MapperGoProVids/tahoe_ridge_1.MP4"),
-        output_path=Path("/tmp/images"),
+        video_path=args.video,
+        output_path=args.output,
     )
     preprocessor()

@@ -110,11 +110,11 @@ class VideoProcessor:
 
         # Verify video matches
         if cache.get("video_name") != video_path.name:
-            logger.debug(f"Cache mismatch: video name")
+            logger.debug("Cache mismatch: video name")
             return False
 
         if cache.get("video_size") != video_path.stat().st_size:
-            logger.debug(f"Cache mismatch: video size")
+            logger.debug("Cache mismatch: video size")
             return False
 
         if cache.get("fps") != self.fps:
