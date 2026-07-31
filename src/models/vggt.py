@@ -10,6 +10,7 @@ from ..core.types import (
     ReconstructionResult,
     PointCloud,
     CameraPoses,
+    PoseConvention,
     VideoInput,
 )
 
@@ -20,12 +21,12 @@ class VGGTModel(BaseModel):
     """
     VGGT: Visual Geometry Grounded Transformer.
 
-    VGGT produces metric-scale 3D reconstructions from image sequences.
+    VGGT produces scale-consistent 3D reconstructions from image sequences.
     It outputs camera intrinsics/extrinsics, depth maps, point maps,
     and 3D point clouds.
 
     Outputs:
-    - Metric-scale point cloud (likely)
+    - Relative-scale point cloud
     - Camera poses with intrinsics
     - Per-point confidence
     - Depth maps
@@ -38,7 +39,7 @@ class VGGTModel(BaseModel):
     """
 
     name = "vggt"
-    outputs_metric_scale = True  # To verify with testing
+    outputs_metric_scale = False
     outputs_poses = True
     outputs_confidence = True
     supports_video_input = False
@@ -49,6 +50,9 @@ class VGGTModel(BaseModel):
         self.window_size = self.config.get("window_size", 100)
         self.window_overlap = self.config.get("window_overlap", 10)
         self.model_name = self.config.get("model_name", "facebook/VGGT-1B")
+        self.model_revision = self.config.get(
+            "model_revision", "860abec7937da0a4c03c41d3c269c366e82abdf9"
+        )
         self.weights_path = self.config.get("weights_path")
         self.device = self.config.get("device", "cuda")
         self.weights_dtype = self.config.get("weights_dtype", "float32")
@@ -64,6 +68,7 @@ class VGGTModel(BaseModel):
         """Return default VGGT configuration."""
         return {
             "model_name": "facebook/VGGT-1B",
+            "model_revision": "860abec7937da0a4c03c41d3c269c366e82abdf9",
             "use_chunking": False,
             "window_size": 100,
             "window_overlap": 10,
@@ -75,7 +80,7 @@ class VGGTModel(BaseModel):
             "min_confidence": 5.0,
             "max_points": 500000,
             "sample_seed": None,
-            "weights_path": None,
+            "weights_path": "weights/vggt/VGGT-1B/model.pt",
         }
 
     def load(self, weights_path: Optional[Path] = None) -> None:
@@ -102,15 +107,22 @@ class VGGTModel(BaseModel):
 
         weights = weights_path or self.weights_path
         if weights is not None:
-            weights = Path(weights)
+            weights = self.resolve_workspace_path(weights)
 
-        if weights is not None and weights.exists():
+        if weights is not None:
+            if not weights.is_file():
+                raise FileNotFoundError(
+                    f"VGGT checkpoint not found: {weights}. Run "
+                    "`scripts/setup_models/download_models.sh vggt`."
+                )
             model = VGGT(img_size=self.image_size)
             state = torch.load(weights, map_location="cpu")
             model.load_state_dict(state)
             self.model = model
         else:
-            self.model = VGGT.from_pretrained(self.model_name)
+            self.model = VGGT.from_pretrained(
+                self.model_name, revision=self.model_revision
+            )
 
         self.model.to(self.device)
         self._configure_model_precision()
@@ -259,12 +271,13 @@ class VGGTModel(BaseModel):
         poses = self._extract_poses(
             images, outputs, video_input, frame_indices=frame_indices
         )
+        source_frame_indices = video_input.get_source_frame_indices()[frame_indices]
 
         window_metadata = {
             "window_id": window_id,
-            "frame_start": frame_indices[0] if frame_indices else 0,
-            "frame_end": frame_indices[-1] if frame_indices else 0,
-            "frame_indices": frame_indices,
+            "frame_start": int(source_frame_indices[0]) if frame_indices else 0,
+            "frame_end": int(source_frame_indices[-1]) if frame_indices else 0,
+            "frame_indices": source_frame_indices.tolist(),
             "window_size": self.window_size,
             "window_overlap": self.window_overlap,
         }
@@ -279,6 +292,7 @@ class VGGTModel(BaseModel):
                 "preprocess_mode": self.preprocess_mode,
                 "min_confidence": self.min_confidence,
                 "use_point_map": self.use_point_map,
+                "scale_status": "relative",
             },
             window_metadata=window_metadata,
         )
@@ -399,7 +413,7 @@ class VGGTModel(BaseModel):
             points=points,
             colors=colors,
             confidence=confidence,
-            is_metric=True,
+            is_metric=False,
         )
 
     def _extract_colors(self, images) -> Optional[np.ndarray]:
@@ -446,20 +460,19 @@ class VGGTModel(BaseModel):
 
         if frame_indices is None:
             frame_indices = list(range(video_input.frame_count))
-        frame_indices = np.array(frame_indices, dtype=np.int64)
-
-        timestamps = None
-        if len(frame_indices) > 0 and video_input.fps > 0:
-            timestamps = frame_indices / float(video_input.fps)
-        if len(frame_indices) > poses.shape[0]:
-            step = len(frame_indices) // poses.shape[0]
-            frame_indices = frame_indices[::step][: poses.shape[0]]
-            if timestamps is not None:
-                timestamps = timestamps[::step][: poses.shape[0]]
+        selection = np.asarray(frame_indices, dtype=np.int64)
+        if len(selection) != poses.shape[0]:
+            raise ValueError(
+                "VGGT output count does not match the selected input frames: "
+                f"{poses.shape[0]} poses for {len(selection)} frames"
+            )
+        timestamps = video_input.get_frame_timestamps()[selection]
+        source_frame_indices = video_input.get_source_frame_indices()[selection]
 
         return CameraPoses(
             poses=poses,
             timestamps=timestamps,
             intrinsics=intrinsics.astype(np.float32),
-            frame_indices=frame_indices,
+            frame_indices=source_frame_indices,
+            pose_convention=PoseConvention.CAMERA_TO_WORLD,
         )

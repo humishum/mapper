@@ -9,7 +9,7 @@ model: "vggt"
 
 model_config:
   model_name: "facebook/VGGT-1B"
-  weights_path: null  # Optional: local model.pt if you downloaded manually
+  weights_path: "weights/vggt/VGGT-1B/model.pt"
   use_chunking: true
   # The mixed-precision aggregator leaves enough headroom for useful temporal
   # context on an 8 GiB GPU.

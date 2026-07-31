@@ -1,12 +1,17 @@
 # DA3-Streaming Model Configuration
 
 # Path to DA3 installation
-da3_path: null  # Set to path like: /path/to/Depth-Anything-3
+da3_path: null  # Pinned checkout; or set DA3_STREAMING_PATH
+da3_config_path: configs/da3_streaming/base_config.yaml
+weights_dir: weights/da3_streaming
 
 # Output options
 save_per_frame_depth: false  # Save individual depth maps
 
 device: cuda
 
-# Note: DA3-Streaming is designed for video with temporal consistency
-# It outputs metric-scale depth and fused point clouds
+# The downloaded Nested model predicts metric geometry. Default streaming
+# alignment is still Sim(3), so the fused result must be treated as relative
+# until the pipeline is explicitly switched to validated SE(3) alignment.
+upstream_revision: 3d835ec1a5802d64a8b8b15f817a1ab54809bfe4
+verify_upstream_revision: true

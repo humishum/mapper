@@ -90,6 +90,15 @@ class BaseModel(ABC):
             self.load()
             self._is_loaded = True
 
+    @staticmethod
+    def resolve_workspace_path(value: str | Path) -> Path:
+        """Resolve model assets relative to the Mapper repository root."""
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        repo_root = Path(__file__).resolve().parents[2]
+        return (repo_root / path).resolve()
+
     def build_windows(
         self,
         total_images: int,

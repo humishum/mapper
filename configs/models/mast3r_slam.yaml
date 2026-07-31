@@ -1,0 +1,12 @@
+# MASt3R-SLAM external pipeline configuration
+
+mast3r_slam_path: null  # Pinned checkout; or set MAST3R_SLAM_PATH
+mast3r_slam_config_path: null  # Defaults to upstream config/base.yaml
+weights_dir: weights/mast3r_slam  # Symlinked as upstream checkpoints/
+calibration_path: null  # Optional GoPro calibration YAML
+python_executable: python
+# Official RGBFiles assigns synthetic timestamps as selected-frame ordinal / 30.
+rgb_folder_timebase_hz: 30.0
+
+upstream_revision: e6f4e3d474fad0e11f561482012be864ba8c3f17
+verify_upstream_revision: true

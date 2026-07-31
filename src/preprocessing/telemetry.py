@@ -412,7 +412,11 @@ class TelemetryExtractor:
         return gps
 
     def extract_initial_gps(
-        self, video_path: Path
+        self,
+        video_path: Path,
+        *,
+        gps_track: Optional[GPSTrack] = None,
+        telemetry_loaded: bool = False,
     ) -> Optional[Tuple[float, float, float]]:
         """
         Extract just the initial GPS coordinates.
@@ -422,8 +426,11 @@ class TelemetryExtractor:
         Returns:
             Tuple of (latitude, longitude, altitude) or None
         """
-        # Try gopro-py first
-        gps = self._extract_gps_only(video_path)
+        # Reuse already-loaded GPMF data when the caller is preparing
+        # keyframes. This avoids parsing a long capture twice.
+        gps = gps_track
+        if gps is None and not telemetry_loaded:
+            gps = self._extract_gps_only(video_path)
         if gps is not None and len(gps) > 0:
             valid_mask = (gps.latitudes != 0) & (gps.longitudes != 0)
             if valid_mask.any():

@@ -51,6 +51,8 @@ class ExperimentConfig:
     align_to_gps: bool = True
     force_reprocess: bool = False
     frame_cache_dir: Optional[Path] = None
+    keyframe_config: dict = field(default_factory=dict)
+    capture_metadata: dict = field(default_factory=dict)
     alignment_config: dict = field(default_factory=dict)
     package_config: dict = field(default_factory=dict)
     video_names: List[str] = field(default_factory=list)
@@ -94,7 +96,11 @@ class ExperimentRunner:
         """
         self.config = config
 
-        self.video_processor = VideoProcessor(fps=config.fps)
+        self.video_processor = VideoProcessor(
+            fps=config.fps,
+            keyframe_config=config.keyframe_config,
+            capture_metadata=config.capture_metadata,
+        )
         self.telemetry_extractor = TelemetryExtractor()
         gps_option_names = {
             "min_correspondences",
@@ -186,6 +192,8 @@ class ExperimentRunner:
             align_to_gps=raw.get("align_to_gps", True),
             force_reprocess=raw.get("force_reprocess", False),
             frame_cache_dir=raw.get("frame_cache_dir"),
+            keyframe_config=raw.get("keyframe_config", {}),
+            capture_metadata=raw.get("capture_metadata", {}),
             video_extensions=raw.get("video_extensions", DEFAULT_VIDEO_EXTENSIONS),
             alignment_config=raw.get("alignment_config", {}),
             package_config=raw.get("package_config", {}),
@@ -300,6 +308,8 @@ class ExperimentRunner:
                 if self.config.frame_cache_dir is not None
                 else None
             ),
+            "keyframe_config": self.config.keyframe_config,
+            "capture_metadata": self.config.capture_metadata,
             "alignment_config": self.config.alignment_config,
             "package_config": self.config.package_config,
             "video_names": self.config.video_names,
@@ -326,36 +336,10 @@ class ExperimentRunner:
         work_dir = exp_dir / ".scratch" / video_name
         work_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract frames with ffmpeg, skip if already cached in output folder
-        self.logger.info("  Extracting frames...")
-        frame_cache_root = self._get_frame_cache_root()
-        frame_cache_root.mkdir(parents=True, exist_ok=True)
-        frame_output_dir = frame_cache_root / video_name
-        image_dir = self.video_processor.process(
-            video_path,
-            frame_output_dir,
-            force=self.config.force_reprocess,
-        )
-        frame_count = self.video_processor.get_frame_count(image_dir)
-        self.logger.info(f"  {frame_count} frames")
-
-        # Extract initial GPS first (GoPro telemetry or EXIF fallback).
-        self.logger.info("  Extracting initial GPS...")
-        initial_gps = self.telemetry_extractor.extract_initial_gps(video_path)
-        if initial_gps is not None:
-            self.logger.info(
-                "  Initial GPS: %.6f, %.6f, %.1f",
-                initial_gps[0],
-                initial_gps[1],
-                initial_gps[2],
-            )
-        else:
-            self.logger.info("  Initial GPS: not available")
-
-        # Extract telemetry from video, only works for gopro videos.
+        # Telemetry must be available before keyframe selection so angular
+        # motion and exact time-correspondence metadata can be persisted.
         self.logger.info("  Extracting telemetry...")
         gps_track, imu_data = self.telemetry_extractor.extract_gps_imu(video_path)
-
         self.logger.info(
             f"  GPS: {len(gps_track)} points"
             if gps_track is not None
@@ -367,18 +351,77 @@ class ExperimentRunner:
             else "  IMU: not available"
         )
 
+        self.logger.info("  Extracting initial GPS...")
+        initial_gps = self.telemetry_extractor.extract_initial_gps(
+            video_path,
+            gps_track=gps_track,
+            telemetry_loaded=True,
+        )
+        if initial_gps is not None:
+            self.logger.info(
+                "  Initial GPS: %.6f, %.6f, %.1f",
+                initial_gps[0],
+                initial_gps[1],
+                initial_gps[2],
+            )
+        else:
+            self.logger.info("  Initial GPS: not available")
+
+        # Normalize the capture and select frames with telemetry already loaded.
+        self.logger.info("  Selecting keyframes...")
+        frame_cache_root = self._get_frame_cache_root()
+        frame_cache_root.mkdir(parents=True, exist_ok=True)
+        frame_output_dir = frame_cache_root / video_name
+        image_dir = self.video_processor.process(
+            video_path,
+            frame_output_dir,
+            force=self.config.force_reprocess,
+            gps_track=gps_track,
+            imu_data=imu_data,
+        )
+        frame_count = self.video_processor.get_frame_count(image_dir)
+        keyframe_manifest = self.video_processor.load_keyframe_manifest(image_dir)
+        capture_metadata = self.video_processor.load_capture_metadata(image_dir)
+        if frame_count == 0:
+            raise RuntimeError(
+                "No frames passed keyframe selection; inspect "
+                f"{image_dir / 'keyframes.json'}"
+            )
+        selected_records = [
+            record
+            for record in keyframe_manifest["candidates"]
+            if record["selected"]
+        ]
+        source_frame_indices = np.asarray(
+            [record["source_frame_index"] for record in selected_records],
+            dtype=np.int64,
+        )
+        frame_timestamps = np.asarray(
+            [record["timestamp_s"] for record in selected_records],
+            dtype=np.float64,
+        )
+        self.logger.info(f"  {frame_count} selected keyframes")
+
         # Create video input
         video_input = VideoInput(
             video_path=video_path,
             image_dir=image_dir,
-            fps=self.config.fps,
+            fps=self.video_processor.keyframe_config.target_fps,
             frame_count=frame_count,
+            source_frame_indices=source_frame_indices,
+            frame_timestamps=frame_timestamps,
             gps_track=gps_track,
             imu_data=imu_data,
             metadata={
                 "video_path": str(video_path),
                 "video_name": video_name,
                 "initial_gps": initial_gps,
+                "capture": capture_metadata,
+                "keyframes": {
+                    "manifest": str(image_dir / "keyframes.json"),
+                    "selection_config": keyframe_manifest["selection_config"],
+                    "selected_count": keyframe_manifest["selected_count"],
+                },
             },
         )
 

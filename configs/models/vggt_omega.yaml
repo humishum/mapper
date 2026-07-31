@@ -1,0 +1,17 @@
+# VGGT-Omega bounded-window reconstruction configuration
+
+vggt_omega_path: null  # Pinned checkout; or set VGGT_OMEGA_PATH
+checkpoint_path: weights/vggt_omega/vggt_omega_1b_512.pt  # Gated checkpoint
+device: cuda
+
+image_resolution: 512
+preprocess_mode: max_size  # balanced | max_size
+use_chunking: true
+window_size: 100
+window_overlap: 20
+confidence_percentile: 40.0
+max_points: 500000
+sample_seed: null
+
+upstream_revision: 39a0cb8af88554f15ddcb5354cd52bde588fa014
+verify_upstream_revision: true

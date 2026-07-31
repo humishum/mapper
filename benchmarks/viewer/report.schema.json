@@ -1,0 +1,149 @@
+{
+  "$id": "https://mapper.local/schemas/viewer-benchmark-report.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "behavior": {
+      "additionalProperties": false,
+      "properties": {
+        "abortedRequestCount": {"minimum": 0, "type": "integer"},
+        "activeArtifactIds": {"items": {"type": "string"}, "type": "array"},
+        "disposedRendererGenerations": {"items": {"type": "integer"}, "type": "array"},
+        "inactiveSiteRequestCount": {"minimum": 0, "type": "integer"},
+        "navigationCount": {"minimum": 0, "type": "integer"},
+        "rendererGeneration": {"minimum": 0, "type": "integer"}
+      },
+      "required": [
+        "navigationCount",
+        "abortedRequestCount",
+        "inactiveSiteRequestCount",
+        "rendererGeneration",
+        "disposedRendererGenerations",
+        "activeArtifactIds"
+      ],
+      "type": "object"
+    },
+    "configuration": {
+      "additionalProperties": false,
+      "properties": {
+        "baseURL": {"type": "string"},
+        "comparisonArtifactId": {"type": "string"},
+        "evidenceMode": {"enum": ["acceptance", "functional"]},
+        "siteAArtifactId": {"type": "string"},
+        "siteBArtifactId": {"type": "string"}
+      },
+      "required": ["baseURL", "siteAArtifactId", "siteBArtifactId", "comparisonArtifactId", "evidenceMode"],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": false,
+      "properties": {
+        "browser": {"type": "string"},
+        "commit": {"type": "string"},
+        "cpu": {"type": "string"},
+        "cpuCount": {"minimum": 1, "type": "integer"},
+        "hostname": {"type": "string"},
+        "node": {"type": "string"},
+        "platform": {"type": "string"},
+        "totalMemoryBytes": {"minimum": 1, "type": "integer"},
+        "webglRenderer": {"minLength": 1, "type": "string"}
+      },
+      "required": [
+        "commit",
+        "browser",
+        "platform",
+        "hostname",
+        "cpu",
+        "cpuCount",
+        "totalMemoryBytes",
+        "node",
+        "webglRenderer"
+      ],
+      "type": "object"
+    },
+    "metrics": {
+      "additionalProperties": false,
+      "properties": {
+        "cpuPoolBytes": {"minimum": 0, "type": "number"},
+        "frameTimeP95Ms": {"minimum": 0, "type": "number"},
+        "frameTimesMs": {"items": {"minimum": 0, "type": "number"}, "type": "array"},
+        "gpuPoolBytes": {"minimum": 0, "type": "number"},
+        "longTasks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "duration": {"minimum": 0, "type": "number"},
+              "startTime": {"minimum": 0, "type": "number"}
+            },
+            "required": ["startTime", "duration"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "visiblePointCount": {"minimum": 0, "type": "number"}
+      },
+      "required": [
+        "frameTimeP95Ms",
+        "frameTimesMs",
+        "longTasks",
+        "visiblePointCount",
+        "cpuPoolBytes",
+        "gpuPoolBytes"
+      ],
+      "type": "object"
+    },
+    "network": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "completedAt": {"type": "number"},
+          "contentRange": {"type": ["string", "null"]},
+          "failure": {"type": ["string", "null"]},
+          "method": {"type": "string"},
+          "range": {"type": ["string", "null"]},
+          "resourceType": {"type": "string"},
+          "startedAt": {"type": "number"},
+          "status": {"type": "integer"},
+          "url": {"type": "string"}
+        },
+        "required": ["url", "method", "resourceType", "range", "startedAt"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "performanceMarks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "startTime": {"minimum": 0, "type": "number"}
+        },
+        "required": ["name", "startTime"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "scenario": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "skipReason": {"type": "string"},
+    "status": {"enum": ["passed", "skipped"]},
+    "timings": {
+      "additionalProperties": {"minimum": 0, "type": "number"},
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "scenario",
+    "status",
+    "identity",
+    "configuration",
+    "timings",
+    "performanceMarks",
+    "network",
+    "metrics",
+    "behavior"
+  ],
+  "title": "Mapper viewer benchmark report v1",
+  "type": "object"
+}

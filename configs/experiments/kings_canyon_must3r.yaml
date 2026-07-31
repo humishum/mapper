@@ -8,8 +8,8 @@ name: "kings_canyon_must3r"
 model: "must3r"
 
 model_config:
-  weights_path: "weights/MUSt3R_512_cvpr.pth"
-  retrieval_path: "weights/MUSt3R_512_retrieval_trainingfree.pth"
+  weights_path: "weights/must3r/MUSt3R_512.pth"
+  retrieval_path: "weights/must3r/MUSt3R_512_retrieval_trainingfree.pth"
   image_size: 512
 
   # Chunked processing for VRAM limits

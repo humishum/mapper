@@ -1,0 +1,10 @@
+# VGGT-Long external pipeline configuration
+
+vggt_long_path: null  # Pinned checkout; or set VGGT_LONG_PATH
+vggt_long_config_path: null  # Defaults to upstream configs/base_config.yaml
+weights_dir: weights/vggt_long  # Symlinked into the pinned checkout by setup
+python_executable: python
+
+# Adapter output is relative-scale because upstream defaults to Sim(3).
+upstream_revision: c160869d1d99c96bb227f414afb3bc68c29c9a76
+verify_upstream_revision: true

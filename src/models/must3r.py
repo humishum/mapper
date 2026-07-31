@@ -10,15 +10,16 @@ from ..core.types import (
     ReconstructionResult,
     PointCloud,
     CameraPoses,
+    PoseConvention,
     VideoInput,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class MASt3RModel(BaseModel):
+class MUSt3RModel(BaseModel):
     """
-    Must3r: Multi-view Stereo 3D Reconstruction.
+    MUSt3R: Multi-view Network for Stereo 3D Reconstruction.
 
 
     Outputs:
@@ -30,7 +31,7 @@ class MASt3RModel(BaseModel):
     """
 
     name = "must3r"
-    outputs_metric_scale = False  # MASt3R outputs relative scale only
+    outputs_metric_scale = False  # MUSt3R outputs relative scale only
     outputs_poses = True
     outputs_confidence = True
     supports_video_input = False
@@ -42,6 +43,7 @@ class MASt3RModel(BaseModel):
         self.weights_path = self.config.get("weights_path")
         self.retrieval_path = self.config.get("retrieval_path")
         self.image_size = self.config.get("image_size", 512)
+        self.device = self.config.get("device", "cuda")
 
         # Processing parameters
         self.use_chunking = self.config.get("use_chunking", False)
@@ -62,11 +64,14 @@ class MASt3RModel(BaseModel):
 
     @classmethod
     def get_default_config(cls) -> dict:
-        """Return default MASt3R configuration."""
+        """Return default MUSt3R configuration."""
         return {
-            "weights_path": None,  # Required - must be set
-            "retrieval_path": None,  # Required - must be set
+            "weights_path": "weights/must3r/MUSt3R_512.pth",
+            "retrieval_path": (
+                "weights/must3r/MUSt3R_512_retrieval_trainingfree.pth"
+            ),
             "image_size": 512,
+            "device": "cuda",
             "use_chunking": False,
             "window_size": 500,
             "window_overlap": 20,
@@ -78,7 +83,7 @@ class MASt3RModel(BaseModel):
         }
 
     def load(self, weights_path: Optional[Path] = None) -> None:
-        """Load MASt3R model weights."""
+        """Load MUSt3R model weights."""
         from must3r.model import load_model
         from must3r.model.blocks.attention import toggle_memory_efficient_attention
 
@@ -88,21 +93,34 @@ class MASt3RModel(BaseModel):
             raise ValueError(
                 "weights_path must be provided either in config or load() argument"
             )
+        weights = self.resolve_workspace_path(weights)
+        if not weights.is_file():
+            raise FileNotFoundError(
+                f"MUSt3R checkpoint not found: {weights}. Run "
+                "`scripts/setup_models/download_models.sh must3r`."
+            )
+        if self.retrieval_path is None:
+            raise ValueError("retrieval_path must be provided")
+        self.retrieval_path = self.resolve_workspace_path(self.retrieval_path)
+        if not self.retrieval_path.is_file():
+            raise FileNotFoundError(
+                f"MUSt3R retrieval checkpoint not found: {self.retrieval_path}"
+            )
 
         # Enable memory-efficient attention
         toggle_memory_efficient_attention(enabled=True)
 
-        logger.info(f"Loading MASt3R model from {weights}")
+        logger.info(f"Loading MUSt3R model from {weights}")
         self.model = load_model(
             weights,
             encoder=None,
             decoder=None,
-            device="cuda",
+            device=self.device,
             img_size=self.image_size,
             memory_mode=None,
         )
         self._is_loaded = True
-        logger.info("MASt3R model loaded successfully")
+        logger.info("MUSt3R model loaded successfully")
 
     def reconstruct(
         self,
@@ -110,7 +128,7 @@ class MASt3RModel(BaseModel):
         output_dir: Path,
     ) -> ReconstructionResult:
         """
-        Run MASt3R reconstruction on video frames.
+        Run MUSt3R reconstruction on video frames.
 
         For long videos, this handles windowing automatically to avoid OOM.
 
@@ -209,7 +227,7 @@ class MASt3RModel(BaseModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Running MASt3R reconstruction on {len(images)} images")
+        logger.info(f"Running MUSt3R reconstruction on {len(images)} images")
         logger.info(f"Output directory: {output_dir}")
 
         # Adjust num_mem_imgs based on actual image count
@@ -222,7 +240,7 @@ class MASt3RModel(BaseModel):
             should_save_glb=False,
             model=self.model,
             retrieval=self.retrieval_path,
-            device="cuda",
+            device=self.device,
             verbose=True,
             image_size=self.image_size,
             amp=False,
@@ -254,12 +272,13 @@ class MASt3RModel(BaseModel):
 
         # Extract camera poses from scene
         poses = self._extract_poses(scene, video_input, frame_indices=frame_indices)
+        source_frame_indices = video_input.get_source_frame_indices()[frame_indices]
 
         window_metadata = {
             "window_id": window_id,
-            "frame_start": frame_indices[0] if frame_indices else 0,
-            "frame_end": frame_indices[-1] if frame_indices else 0,
-            "frame_indices": frame_indices,
+            "frame_start": int(source_frame_indices[0]) if frame_indices else 0,
+            "frame_end": int(source_frame_indices[-1]) if frame_indices else 0,
+            "frame_indices": source_frame_indices.tolist(),
             "window_size": self.window_size,
             "window_overlap": self.window_overlap,
         }
@@ -357,7 +376,7 @@ class MASt3RModel(BaseModel):
         video_input: VideoInput,
         frame_indices: Optional[List[int]] = None,
     ) -> Optional[CameraPoses]:
-        """Extract camera poses from MASt3R scene object."""
+        """Extract camera poses from MUSt3R scene object."""
         try:
             if hasattr(scene, "cams2world") and scene.cams2world is not None:
                 poses = scene.cams2world
@@ -378,59 +397,70 @@ class MASt3RModel(BaseModel):
                 if poses.ndim == 2:  # (N, 16) flattened
                     poses = poses.reshape(-1, 4, 4)
 
-                # Get timestamps from video input
                 if frame_indices is None:
                     frame_indices = list(range(video_input.frame_count))
-                frame_indices = np.array(frame_indices, dtype=np.int64)
-
-                timestamps = None
-                if len(frame_indices) > 0 and video_input.fps > 0:
-                    timestamps = frame_indices / float(video_input.fps)
-
-                if len(frame_indices) > poses.shape[0]:
-                    step = len(frame_indices) // poses.shape[0]
-                    frame_indices = frame_indices[::step][: poses.shape[0]]
-                    if timestamps is not None:
-                        timestamps = timestamps[::step][: poses.shape[0]]
+                selection = np.asarray(frame_indices, dtype=np.int64)
+                if len(selection) != poses.shape[0]:
+                    raise ValueError(
+                        "MUSt3R output count does not match the selected input "
+                        f"frames: {poses.shape[0]} poses for {len(selection)} frames"
+                    )
+                timestamps = video_input.get_frame_timestamps()[selection]
+                source_frame_indices = video_input.get_source_frame_indices()[
+                    selection
+                ]
 
                 # Try to get intrinsics
                 intrinsics = None
                 if hasattr(scene, "focals") and scene.focals is not None:
-                    focals = scene.focals
-                    if isinstance(focals, list):
-                        focals = np.array(
-                            [
-                                f.cpu().numpy() if hasattr(f, "cpu") else np.asarray(f)
-                                for f in focals
-                            ]
-                        )
-                    elif hasattr(focals, "cpu"):
-                        focals = focals.cpu().numpy()
-                    else:
-                        focals = np.asarray(focals)
-                    # Build intrinsics matrix
-                    # Assume principal point at image center
-                    cx, cy = self.image_size / 2, self.image_size / 2
-                    if focals.ndim == 1:
-                        fx = fy = float(focals[0])
-                    else:
-                        fx = fy = float(focals.mean())
-                    intrinsics = np.array(
+                    focals = np.asarray(
                         [
-                            [fx, 0, cx],
-                            [0, fy, cy],
-                            [0, 0, 1],
+                            self._as_numpy(focal).reshape(-1)[0]
+                            for focal in scene.focals
                         ],
                         dtype=np.float32,
                     )
+                    if len(focals) != len(poses):
+                        raise ValueError(
+                            "MUSt3R focal count does not match its pose count"
+                        )
+                    shapes = np.repeat(
+                        np.array([[self.image_size, self.image_size]]),
+                        len(poses),
+                        axis=0,
+                    )
+                    if (
+                        hasattr(scene, "true_shape")
+                        and scene.true_shape is not None
+                    ):
+                        candidate_shapes = self._as_numpy(scene.true_shape).reshape(
+                            len(poses), -1
+                        )
+                        if candidate_shapes.shape[1] >= 2:
+                            shapes = candidate_shapes[:, :2]
+                    intrinsics = np.repeat(
+                        np.eye(3, dtype=np.float32)[None], len(poses), axis=0
+                    )
+                    intrinsics[:, 0, 0] = focals
+                    intrinsics[:, 1, 1] = focals
+                    intrinsics[:, 0, 2] = shapes[:, 1] / 2.0
+                    intrinsics[:, 1, 2] = shapes[:, 0] / 2.0
 
                 return CameraPoses(
                     poses=poses.astype(np.float32),
                     timestamps=timestamps,
                     intrinsics=intrinsics,
-                    frame_indices=frame_indices,
+                    frame_indices=source_frame_indices,
+                    pose_convention=PoseConvention.CAMERA_TO_WORLD,
                 )
+        except ValueError:
+            raise
         except Exception as e:
             logger.warning(f"Could not extract poses from scene: {e}")
 
         return None
+
+
+# Backward-compatible import for existing experiments.  The upstream repository
+# and model are MUSt3R; MASt3R is a different Naver model family.
+MASt3RModel = MUSt3RModel

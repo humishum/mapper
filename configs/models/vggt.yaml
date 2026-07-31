@@ -1,7 +1,10 @@
 # VGGT Model Configuration
 
-# Model name (auto-downloads from HuggingFace)
-model_name: facebook/vggt-1b
+# Pinned Hub identity is retained for provenance. Runtime uses the canonical
+# repo-local checkpoint installed by scripts/setup_models/download_models.sh.
+model_name: facebook/VGGT-1B
+model_revision: 860abec7937da0a4c03c41d3c269c366e82abdf9
+weights_path: weights/vggt/VGGT-1B/model.pt
 
 # Processing parameters
 use_chunking: true
@@ -9,5 +12,5 @@ window_size: 100
 window_overlap: 10
 device: cuda
 
-# Note: VGGT outputs metric-scale reconstructions
+# Monocular VGGT output is internally consistent but not guaranteed metric.
 # Camera intrinsics are estimated by the model

@@ -11,6 +11,7 @@ from ..core.types import (
     ReconstructionResult,
     PointCloud,
     CameraPoses,
+    PoseConvention,
     VideoInput,
 )
 
@@ -19,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 class ORBSLAMModel(BaseModel):
     """
-    ORB-SLAM reimplemented in Python.
+    Experimental adjacent-frame ORB visual odometry.
 
     A simplified visual odometry implementation using ORB features.
-    This is not the full ORB-SLAM3 system, but a basic implementation
-    suitable for generating sparse point clouds and camera trajectories.
+    This is not ORB-SLAM or ORB-SLAM3.  It has no keyframe map, bundle
+    adjustment, relocalization, loop closure, or multi-map merge.
 
     Core components:
     1. ORB feature extraction (OpenCV)
@@ -38,7 +39,7 @@ class ORBSLAMModel(BaseModel):
     """
 
     name = "orb_slam"
-    outputs_metric_scale = False  # Needs IMU/GPS for scale
+    outputs_metric_scale = False
     outputs_poses = True
     outputs_confidence = False
     supports_video_input = False
@@ -57,6 +58,7 @@ class ORBSLAMModel(BaseModel):
 
         # Use IMU for scale recovery if available
         self.use_imu = self.config.get("use_imu", False)
+        self.allow_experimental = self.config.get("allow_experimental", False)
 
         # Camera intrinsics (will be estimated if not provided)
         self.fx = self.config.get("fx")
@@ -77,6 +79,7 @@ class ORBSLAMModel(BaseModel):
             "match_ratio": 0.75,
             "min_matches": 50,
             "use_imu": False,
+            "allow_experimental": False,
             # Camera intrinsics (None = estimate from image size)
             "fx": None,
             "fy": None,
@@ -114,6 +117,17 @@ class ORBSLAMModel(BaseModel):
         5. Accumulate poses and points
         """
         self.ensure_loaded()
+        if not self.allow_experimental:
+            raise RuntimeError(
+                "The `orb_slam` adapter is disabled because it is experimental "
+                "adjacent-frame visual odometry, not ORB-SLAM. Set "
+                "allow_experimental=true only for a non-production control."
+            )
+        if self.use_imu:
+            raise NotImplementedError(
+                "The experimental ORB VO adapter has no IMU preintegration or "
+                "metric-scale estimator; use_imu cannot be enabled."
+            )
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +228,9 @@ class ORBSLAMModel(BaseModel):
             T[:3, 3] = t.flatten()
 
             # Accumulate pose
-            current_pose = poses[-1] @ T
+            # recoverPose returns the transform from the previous camera frame
+            # to the current camera frame.  Accumulate it as world-to-camera.
+            current_pose = T @ poses[-1]
             poses.append(current_pose)
 
             # Triangulate points
@@ -266,19 +282,15 @@ class ORBSLAMModel(BaseModel):
             f"ORB-SLAM: Generated {len(points_array)} points, {len(poses_array)} poses"
         )
 
-        # Optional: Use IMU for scale recovery
         scale = 1.0
         is_metric = False
-        if self.use_imu and video_input.imu_data is not None:
-            scale = self._estimate_scale_from_imu(poses_array, video_input.imu_data)
-            points_array *= scale
-            is_metric = True
-            logger.info(f"ORB-SLAM: Applied IMU scale factor: {scale:.4f}")
 
-        # Get timestamps
         timestamps = video_input.get_frame_timestamps()
-        if len(timestamps) > len(poses_array):
-            timestamps = timestamps[: len(poses_array)]
+        frame_indices = video_input.get_source_frame_indices()
+        if len(timestamps) != len(poses_array) or len(frame_indices) != len(
+            poses_array
+        ):
+            raise ValueError("ORB VO pose count does not match selected frames")
 
         return ReconstructionResult(
             pointcloud=PointCloud(
@@ -291,9 +303,22 @@ class ORBSLAMModel(BaseModel):
                 poses=poses_array,
                 timestamps=timestamps,
                 intrinsics=K,
+                frame_indices=frame_indices,
+                pose_convention=PoseConvention.WORLD_TO_CAMERA,
             ),
             metadata={
                 "model": "orb_slam",
+                "implementation": "experimental_opencv_adjacent_frame_vo",
+                "scale_status": "relative",
+                "pose_convention": PoseConvention.WORLD_TO_CAMERA.value,
+                "intrinsics_status": (
+                    "configured"
+                    if all(
+                        value is not None
+                        for value in (self.fx, self.fy, self.cx, self.cy)
+                    )
+                    else "image_size_heuristic"
+                ),
                 "num_features": self.num_features,
                 "total_matches": len(all_points),
                 "frames_processed": len(poses_array),
@@ -412,23 +437,3 @@ class ORBSLAMModel(BaseModel):
                 colors.append([128, 128, 128])
 
         return colors
-
-    def _estimate_scale_from_imu(
-        self,
-        poses: np.ndarray,
-        imu_data,
-    ) -> float:
-        """
-        Estimate scale using IMU integration.
-
-        This is a simplified approach - integrates accelerometer
-        to estimate displacement and compares to visual odometry.
-        """
-        # TODO: Implement proper IMU integration
-        # This would require:
-        # 1. Integrate accelerometer (double integration with gravity removal)
-        # 2. Compare integrated displacement to visual odometry
-        # 3. Compute optimal scale factor
-
-        logger.warning("IMU scale estimation not fully implemented")
-        return 1.0

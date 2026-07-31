@@ -10,8 +10,8 @@ model: "must3r"
 
 # Model-specific configuration
 model_config:
-  weights_path: "/path/to/must3r/weights.pth"
-  retrieval_path: "/path/to/retrieval/data"
+  weights_path: "weights/must3r/MUSt3R_512.pth"
+  retrieval_path: "weights/must3r/MUSt3R_512_retrieval_trainingfree.pth"
   image_size: 512
   window_size: 500
   min_confidence: 5.0
@@ -21,7 +21,29 @@ input_folder: "/path/to/videos"
 output_folder: "/path/to/output"
 
 # Processing options
-fps: 10  # Frame extraction rate
+fps: 10  # Backwards-compatible candidate extraction rate
+keyframe_config:
+  mode: "quality_motion"  # fixed_rate | quality_motion
+  candidate_fps: 10       # Decode/sample ceiling
+  target_fps: 2           # Fixed output rate or adaptive maximum-gap baseline
+  min_interval_s: 0.25
+  max_interval_s: 1.0
+  min_sharpness: 25.0
+  min_mean_luma: 12.0
+  max_mean_luma: 243.0
+  max_clipped_fraction: 0.85
+  min_motion_fraction: 0.015
+  min_angular_speed_rad_s: 0.35
+
+# Record settings that affect the camera model but are not reliably available
+# through ffprobe. These values are copied into capture_metadata.json.
+capture_metadata:
+  camera_model: null
+  lens_mode: null
+  hypersmooth: null
+  crop_mode: null
+  calibration_profile: null
+
 align_to_gps: true  # Align output to GPS coordinates
 force_reprocess: false  # Re-extract frames even if cached
 frame_cache_dir: null  # Optional: override cache root (defaults to output_folder/_frame_cache)

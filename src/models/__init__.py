@@ -11,9 +11,12 @@ logger = logging.getLogger(__name__)
 # Model registry - maps model names to their module paths
 # Format: "name": "module.path.ClassName"
 _MODEL_REGISTRY = {
-    "must3r": "src.models.must3r.MASt3RModel",
+    "must3r": "src.models.must3r.MUSt3RModel",
     "vggt": "src.models.vggt.VGGTModel",
     "da3_streaming": "src.models.da3_streaming.DA3StreamingModel",
+    "vggt_long": "src.models.vggt_long.VGGTLongModel",
+    "mast3r_slam": "src.models.mast3r_slam.MASt3RSLAMModel",
+    "vggt_omega": "src.models.vggt_omega.VGGTOmegaModel",
     "orb_slam": "src.models.orb_slam.ORBSLAMModel",
 }
 
@@ -23,7 +26,7 @@ def get_model(name: str) -> Type[BaseModel]:
     Get a model class by name.
 
     Args:
-        name: Model name (e.g., "must3r", "vggt", "da3_streaming", "orb_slam")
+        name: Registered model name (see :func:`list_models`)
 
     Returns:
         Model class (not instantiated)

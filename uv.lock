@@ -1133,7 +1133,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.30.1" },
     { name = "laspy", extras = ["lazrs"], specifier = ">=2.7.0" },
     { name = "matplotlib", specifier = ">=3.5.0" },
-    { name = "must3r", git = "https://github.com/naver/must3r.git" },
+    { name = "must3r", git = "https://github.com/naver/must3r.git?rev=5b63804021789b7dc79313dfbe588671b1b074e2#5b63804021789b7dc79313dfbe588671b1b074e2" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "open3d", specifier = ">=0.18.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
@@ -1158,7 +1158,7 @@ requires-dist = [
     { name = "torchvision", specifier = "==0.22.0" },
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "trimesh", specifier = ">=3.15.0" },
-    { name = "vggt", git = "https://github.com/facebookresearch/vggt.git?rev=44b3afbd1869d8bde4894dd8ea1e293112dd5eba#44b3afbd1869d8bde4894dd8ea1e293112dd5eba" },
+    { name = "vggt", git = "https://github.com/facebookresearch/vggt.git?rev=a288dd0f14786c93483e45524328726ab7b1b4ce#a288dd0f14786c93483e45524328726ab7b1b4ce" },
     { name = "viser", specifier = ">=1.0.0" },
     { name = "watchdog", specifier = ">=4.0.0" },
     { name = "xformers", specifier = "==0.0.30" },
@@ -1276,7 +1276,7 @@ wheels = [
 [[package]]
 name = "must3r"
 version = "1.0.0"
-source = { git = "https://github.com/naver/must3r.git#5b63804021789b7dc79313dfbe588671b1b074e2" }
+source = { git = "https://github.com/naver/must3r.git?rev=5b63804021789b7dc79313dfbe588671b1b074e2#5b63804021789b7dc79313dfbe588671b1b074e2" }
 dependencies = [
     { name = "asmk", extra = ["cpu"] },
     { name = "croco" },
@@ -2689,7 +2689,7 @@ wheels = [
 [[package]]
 name = "vggt"
 version = "0.0.1"
-source = { git = "https://github.com/facebookresearch/vggt.git?rev=44b3afbd1869d8bde4894dd8ea1e293112dd5eba#44b3afbd1869d8bde4894dd8ea1e293112dd5eba" }
+source = { git = "https://github.com/facebookresearch/vggt.git?rev=a288dd0f14786c93483e45524328726ab7b1b4ce#a288dd0f14786c93483e45524328726ab7b1b4ce" }
 dependencies = [
     { name = "einops" },
     { name = "huggingface-hub" },

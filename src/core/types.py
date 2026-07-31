@@ -907,6 +907,11 @@ class VideoInput:
     fps: float  # Frame extraction rate
     frame_count: int  # Number of extracted frames
 
+    # Exact identities of selected source frames. These differ from the
+    # sequential output filenames when adaptive keyframe selection is enabled.
+    source_frame_indices: Optional[np.ndarray] = None
+    frame_timestamps: Optional[np.ndarray] = None
+
     # Optional telemetry (extracted from GoPro/phone)
     gps_track: Optional[GPSTrack] = None
     imu_data: Optional[IMUData] = None
@@ -919,5 +924,13 @@ class VideoInput:
         return sorted(self.image_dir.glob("frame_*.jpg"))
 
     def get_frame_timestamps(self) -> np.ndarray:
-        """Get timestamps for each frame based on FPS."""
+        """Get exact selected-frame timestamps, with a legacy FPS fallback."""
+        if self.frame_timestamps is not None:
+            return np.asarray(self.frame_timestamps, dtype=np.float64)
         return np.arange(self.frame_count) / self.fps
+
+    def get_source_frame_indices(self) -> np.ndarray:
+        """Get original decoded-frame indices for selected images."""
+        if self.source_frame_indices is not None:
+            return np.asarray(self.source_frame_indices, dtype=np.int64)
+        return np.arange(self.frame_count, dtype=np.int64)

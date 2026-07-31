@@ -1,11 +1,12 @@
-# MASt3R Model Configuration
+# MUSt3R Model Configuration
 
-# Model weights (required)
-weights_path: null  # Set to path like: /path/to/must3r/weights.pth
-retrieval_path: null  # Set to path for retrieval data
+# Model weights (installed by scripts/setup_models/download_models.sh must3r)
+weights_path: weights/must3r/MUSt3R_512.pth
+retrieval_path: weights/must3r/MUSt3R_512_retrieval_trainingfree.pth
 
 # Image processing
 image_size: 512  # Input image size for model
+device: cuda
 
 # Windowing for long videos
 use_chunking: true

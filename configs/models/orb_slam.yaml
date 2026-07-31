@@ -10,7 +10,8 @@ match_ratio: 0.75  # Lowe's ratio test threshold
 min_matches: 50  # Minimum matches to estimate pose
 
 # Scale recovery
-use_imu: false  # Use IMU for scale (requires IMU data)
+use_imu: false  # Unsupported: no IMU preintegration is implemented
+allow_experimental: false  # Explicit opt-in; this is adjacent-frame VO, not ORB-SLAM
 
 # Camera intrinsics (optional - will estimate if not provided)
 # fx: 1000.0
@@ -18,4 +19,4 @@ use_imu: false  # Use IMU for scale (requires IMU data)
 # cx: 640.0
 # cy: 360.0
 
-# Note: ORB-SLAM does NOT output metric scale without IMU/GPS
+# This adapter is intentionally disabled by default and never claims metric scale.

@@ -1,0 +1,17 @@
+{
+  "name": "mapper-viewer-benchmarks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test --config playwright.config.ts",
+    "test:unaligned": "playwright test --config playwright.unaligned.config.ts",
+    "test:mp7": "playwright test --config playwright.mp7.config.ts",
+    "list": "playwright test --config playwright.config.ts --list",
+    "list:unaligned": "playwright test --config playwright.unaligned.config.ts --list",
+    "list:mp7": "playwright test --config playwright.mp7.config.ts --list",
+    "validate": "node validation.test.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}
