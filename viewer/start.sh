@@ -5,10 +5,11 @@ VIEWER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${VIEWER_DIR}/.." && pwd)"
 FRONTEND_DIR="${VIEWER_DIR}/frontend"
 MODE="dev"
+HOST_OVERRIDE="0.0.0.0"
 
 usage() {
     cat <<'EOF'
-Usage: ./viewer/start.sh [--production|--dev] [--no-basemap]
+Usage: ./viewer/start.sh [--production|--dev] [--host ADDRESS] [--no-basemap]
 
 Starts the Mapper catalog API and Giro3D viewer together. Press Ctrl+C to
 stop both services.
@@ -16,6 +17,7 @@ stop both services.
 Options:
   --production   Build and serve the optimized frontend (recommended for demos)
   --dev          Run the Vite development server (default)
+  --host ADDRESS Bind both services to ADDRESS (use 0.0.0.0 for remote access)
   --no-basemap   Disable external basemap tile requests
   -h, --help     Show this help
 
@@ -36,6 +38,15 @@ while (($#)); do
         --dev)
             MODE="dev"
             ;;
+        --host)
+            if (($# < 2)); then
+                echo "Missing address for --host" >&2
+                usage >&2
+                exit 2
+            fi
+            HOST_OVERRIDE="$2"
+            shift
+            ;;
         --no-basemap)
             export VITE_BASEMAP_ENABLED=false
             ;;
@@ -52,11 +63,16 @@ while (($#)); do
     shift
 done
 
-export MAPPER_CATALOG_PATH="${MAPPER_CATALOG_PATH:-/home/ape/mapper_output/phase1_fresh/catalog.sqlite3}"
+# export MAPPER_CATALOG_PATH="${MAPPER_CATALOG_PATH:-/home/ape/mapper_output/phase1_fresh/catalog.sqlite3}"
+export MAPPER_CATALOG_PATH="${MAPPER_CATALOG_PATH:-/home/ape/mapper_output/091926/must3r/catalog.sqlite3}"
 export MAPPER_HOST="${MAPPER_HOST:-127.0.0.1}"
 export PORT="${PORT:-8000}"
 export VITE_HOST="${VITE_HOST:-127.0.0.1}"
 export VITE_PORT="${VITE_PORT:-5173}"
+if [[ -n "${HOST_OVERRIDE}" ]]; then
+    export MAPPER_HOST="${HOST_OVERRIDE}"
+    export VITE_HOST="${HOST_OVERRIDE}"
+fi
 export VITE_API_PROXY_TARGET="${VITE_API_PROXY_TARGET:-http://127.0.0.1:${PORT}}"
 
 if [[ ! -r "${MAPPER_CATALOG_PATH}" ]]; then

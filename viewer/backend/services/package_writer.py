@@ -47,6 +47,8 @@ def describe_artifact(
     kind: str,
     format: str,
     media_type: str,
+    byte_size: int | None = None,
+    sha256: str | None = None,
     **contract_fields: Any,
 ) -> ArtifactFile:
     """Create a checksummed manifest entry for an already-written file/tree."""
@@ -55,15 +57,15 @@ def describe_artifact(
     if not target.exists():
         raise FileNotFoundError(target)
     if target.is_file():
-        byte_size = target.stat().st_size
-        checksum = sha256_file(target)
+        measured_byte_size = target.stat().st_size
+        checksum = sha256 or sha256_file(target)
     elif target.is_dir():
-        byte_size = sum(
+        measured_byte_size = sum(
             child.stat().st_size
             for child in target.rglob("*")
             if child.is_file() and not child.is_symlink()
         )
-        checksum = sha256_directory(target)
+        checksum = sha256 or sha256_directory(target)
     else:
         raise ValueError(f"artifact is neither a regular file nor directory: {target}")
     return ArtifactFile(
@@ -72,7 +74,7 @@ def describe_artifact(
         format=format,
         path=relative_path,
         media_type=media_type,
-        byte_size=byte_size,
+        byte_size=measured_byte_size if byte_size is None else byte_size,
         sha256=checksum,
         **contract_fields,
     )

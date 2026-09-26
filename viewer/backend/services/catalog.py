@@ -160,6 +160,15 @@ class Catalog:
     def register_package(self, package_root: str | Path) -> dict[str, Any]:
         """Validate then register a package atomically and idempotently."""
         package = self.validator.validate(package_root)
+        return self._register_validated_package(package)
+
+    def _register_validated_package(self, package: ValidatedPackage) -> dict[str, Any]:
+        """Register a package already validated in the current transaction.
+
+        This is for tightly controlled publisher flows. Public callers should
+        use :meth:`register_package`, which always performs its own validation.
+        """
+
         manifest = package.manifest
         canonical_root = str(package.root)
         canonical_manifest = str(package.manifest_path)
